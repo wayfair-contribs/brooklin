@@ -116,10 +116,15 @@ public class KafkaTransportProvider implements TransportProvider {
       // If the partition is specified. We send the record to the specific partition
       return new ProducerRecord<>(topicName, partition.get(), keyValue, payloadValue);
     } else {
-      // If the partition is not specified. We use the partitionKey as the key. Kafka will use the hash of that
-      // to determine the partition. If partitionKey does not exist, use the key value.
-      keyValue = record.getPartitionKey().isPresent()
-          ? record.getPartitionKey().get().getBytes(StandardCharsets.UTF_8) : null;
+      // If the partition is not specified,
+      // we will set the key to either keyValue or PartitionKey (based on which one is set)
+      // and let kafka find the partition based on the hash of the key.
+      // If neither keyValue or PartitionKey is specified, then we set the key explicitly to null so that
+      // kafka will choose a partition in a round-robin fashion.
+      if (keyValue.length == 0) {
+        keyValue = record.getPartitionKey().isPresent()
+                ? record.getPartitionKey().get().getBytes(StandardCharsets.UTF_8) : null;
+      }
       return new ProducerRecord<>(topicName, keyValue, payloadValue);
     }
   }

@@ -3,9 +3,7 @@
  *  Licensed under the BSD 2-Clause License. See the LICENSE file in the project root for license information.
  *  See the NOTICE file in the project root for additional information regarding copyright ownership.
  */
-package com.linkedin.datastream.cloud.storage;
-
-import com.linkedin.datastream.server.api.transport.SendCallback;
+package com.linkedin.datastream.common;
 
 /**
  * Record and it's associated metadata
@@ -156,7 +154,7 @@ public class Package extends PackageTracking {
     }
 
     /**
-     * Builder class for {@link com.linkedin.datastream.cloud.storage.Package}
+     * Builder class for {@link Package}
      */
     public static class PackageBuilder {
         private Record _record;

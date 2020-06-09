@@ -22,11 +22,13 @@ import com.linkedin.datastream.cloud.storage.committer.ObjectCommitter;
 
 import com.linkedin.datastream.common.BrooklinEnvelope;
 import com.linkedin.datastream.common.BrooklinEnvelopeMetadataConstants;
+import com.linkedin.datastream.common.Package;
+import com.linkedin.datastream.common.Record;
+import com.linkedin.datastream.common.SendCallback;
 import com.linkedin.datastream.common.VerifiableProperties;
 
 import com.linkedin.datastream.server.DatastreamProducerRecord;
 
-import com.linkedin.datastream.server.api.transport.SendCallback;
 import com.linkedin.datastream.server.api.transport.TransportProvider;
 
 /**
@@ -96,7 +98,7 @@ public class CloudStorageTransportProvider implements TransportProvider {
               () -> {
                  for (ObjectBuilder objectBuilder: _objectBuilders) {
                     LOG.info("Try flush signal sent.");
-                    objectBuilder.assign(new Package.PackageBuilder().buildTryFlushSignalPackage());
+                    objectBuilder.assign(new com.linkedin.datastream.common.Package.PackageBuilder().buildTryFlushSignalPackage());
                  }
                  },
               builder._maxFileAge / 2,
@@ -104,14 +106,14 @@ public class CloudStorageTransportProvider implements TransportProvider {
               TimeUnit.MILLISECONDS);
    }
 
-   private void delegate(final Package aPackage) {
+   private void delegate(final com.linkedin.datastream.common.Package aPackage) {
       this._objectBuilders.get(Math.abs(aPackage.hashCode() % _objectBuilders.size())).assign(aPackage);
    }
 
    @Override
    public void send(String destination, DatastreamProducerRecord record, SendCallback onComplete) {
       for (final BrooklinEnvelope env :  record.getEvents()) {
-         final Package aPackage = new Package.PackageBuilder()
+         final com.linkedin.datastream.common.Package aPackage = new com.linkedin.datastream.common.Package.PackageBuilder()
                  .setRecord(new Record(env.getKey(), env.getValue()))
                  .setTopic(env.getMetadata().get(KAFKA_ORIGIN_TOPIC))
                  .setPartition(env.getMetadata().get(KAFKA_ORIGIN_PARTITION))
@@ -156,9 +158,9 @@ public class CloudStorageTransportProvider implements TransportProvider {
    @Override
    public void flush() {
       LOG.info("Forcing flush on object builders.");
-      List<Package> flushSignalPackages = new ArrayList<>();
+      List<com.linkedin.datastream.common.Package> flushSignalPackages = new ArrayList<>();
       for (final ObjectBuilder objectBuilder : _objectBuilders) {
-         final Package aPackage = new Package.PackageBuilder().buildFroceFlushSignalPackage();
+         final com.linkedin.datastream.common.Package aPackage = new com.linkedin.datastream.common.Package.PackageBuilder().buildFroceFlushSignalPackage();
          flushSignalPackages.add(aPackage);
          objectBuilder.assign(aPackage);
       }

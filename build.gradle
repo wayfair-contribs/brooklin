@@ -163,7 +163,6 @@ project(':datastream-cloud-storage') {
     compile "com.google.cloud:google-cloud-storage:$googleCloudStorageVersion"
 
     compile project(':datastream-server')
-    compile project(':datastream-server-api')
     compile project(':datastream-utils')
     
     testCompile "org.mockito:mockito-core:$mockitoVersion"

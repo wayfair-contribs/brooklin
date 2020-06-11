@@ -146,6 +146,36 @@ project(':datastream-common') {
   }
 }
 
+project(':datastream-bigquery') {
+  dependencies {
+
+    compile "org.apache.avro:avro:$avroVersion"
+    compile "org.apache.kafka:kafka-clients:$kafkaClientsVersion"
+
+    compile "io.confluent:kafka-avro-serializer:$kafkaSchemaRegistryClientVersion"
+    compile "io.confluent:kafka-schema-registry:$kafkaSchemaRegistryVersion"
+    compile "io.confluent:kafka-schema-registry-client:$kafkaSchemaRegistryClientVersion"
+
+    compile "com.google.cloud:google-cloud-storage:$googleCloudStorageVersion"
+    compile "com.google.cloud:google-cloud-bigquery:$googleCloudBigqueryVersion"
+
+    compile project(':datastream-server')
+    compile project(':datastream-utils')
+
+    testCompile "org.mockito:mockito-core:$mockitoVersion"
+
+    tasks.create(name: "copyDependentLibs", type: Copy) {
+      from (configurations.runtime) {
+      }
+      into "$buildDir/dependent-libs"
+    }
+
+    jar {
+      dependsOn 'copyDependentLibs'
+    }
+  }
+}
+
 project(':datastream-cloud-storage') {
   dependencies {
 
@@ -159,12 +189,12 @@ project(':datastream-cloud-storage') {
     compile "io.confluent:kafka-avro-serializer:$kafkaSchemaRegistryClientVersion"
     compile "io.confluent:kafka-schema-registry:$kafkaSchemaRegistryVersion"
     compile "io.confluent:kafka-schema-registry-client:$kafkaSchemaRegistryClientVersion"
-      
+
     compile "com.google.cloud:google-cloud-storage:$googleCloudStorageVersion"
 
     compile project(':datastream-server')
     compile project(':datastream-utils')
-    
+
     testCompile "org.mockito:mockito-core:$mockitoVersion"
 
     tasks.create(name: "copyDependentLibs", type: Copy) {
@@ -303,6 +333,8 @@ project(':datastream-tools') {
     from(rootProject.file("config")) { into "config/" }
     from(configurations.runtime) { into("libs/") }
     from(configurations.archives.artifacts.files) { into("libs/") }
+    from(project(':datastream-bigquery').jar) { into("libs/") }
+    from(project(':datastream-bigquery').configurations.runtime) { into("libs/") }
     from(project(':datastream-cloud-storage').jar) { into("libs/") }
     from(project(':datastream-cloud-storage').configurations.runtime) { into("libs/") }
     from(project(':datastream-tools').jar) { into("libs/") }

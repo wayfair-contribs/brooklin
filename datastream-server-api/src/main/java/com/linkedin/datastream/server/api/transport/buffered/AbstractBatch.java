@@ -27,6 +27,7 @@ public abstract class AbstractBatch {
         this._destination = null;
         this._ackCallbacks = new ArrayList<>();
         this._recordMetadata = new ArrayList<>();
+        this._counterLock = new Object();
     }
 
     protected void waitForRoomInCommitBacklog() throws InterruptedException {

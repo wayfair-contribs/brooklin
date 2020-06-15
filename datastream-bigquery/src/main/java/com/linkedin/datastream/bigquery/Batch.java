@@ -2,6 +2,7 @@ package com.linkedin.datastream.bigquery;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import com.google.cloud.bigquery.InsertAllRequest;
 import com.google.cloud.bigquery.Schema;
@@ -10,7 +11,6 @@ import com.linkedin.datastream.bigquery.translator.SchemaTranslator;
 import com.linkedin.datastream.common.DatastreamRecordMetadata;
 import com.linkedin.datastream.common.Package;
 import com.linkedin.datastream.common.SchemaRegistry;
-import com.linkedin.datastream.common.VerifiableProperties;
 import com.linkedin.datastream.server.api.transport.buffered.AbstractBatch;
 
 import io.confluent.kafka.serializers.KafkaAvroDeserializer;
@@ -18,8 +18,6 @@ import io.confluent.kafka.serializers.KafkaAvroDeserializer;
 import org.apache.avro.generic.GenericRecord;
 
 public class Batch extends AbstractBatch {
-
-    private static final String CONFIG_SCHEMA_REGISTRY = "schemaRegistry";
 
     private final int _maxBatchSize;
     private final int _maxBatchAge;
@@ -37,7 +35,7 @@ public class Batch extends AbstractBatch {
     public Batch(int maxBatchSize,
                  int maxBatchAge,
                  int maxInflightWriteLogCommits,
-                 VerifiableProperties conversionProperties,
+                 SchemaRegistry schemaRegistry,
                  BigqueryBatchCommitter committer) {
         super(maxInflightWriteLogCommits);
         this._maxBatchSize = maxBatchSize;
@@ -47,8 +45,7 @@ public class Batch extends AbstractBatch {
         this._batchCreateTimeStamp = System.currentTimeMillis();
         this._schema = null;
         this._destination = null;
-        this._schemaRegistry = new SchemaRegistry(
-                new VerifiableProperties(conversionProperties.getDomainProperties(CONFIG_SCHEMA_REGISTRY)));
+        this._schemaRegistry = schemaRegistry;
         this._deserializer = _schemaRegistry.getDeserializer();
     }
 
@@ -65,7 +62,11 @@ public class Batch extends AbstractBatch {
 
             if (_destination == null) {
                 String[] datasetTableSuffix = aPackage.getDestination().split("/");
-                _destination = datasetTableSuffix[0] + "/" + aPackage.getTopic() + datasetTableSuffix[1];
+                if (datasetTableSuffix.length == 2) {
+                    _destination = datasetTableSuffix[0] + "/" + aPackage.getTopic() + datasetTableSuffix[1];
+                } else {
+                    _destination = datasetTableSuffix[0] + "/" + aPackage.getTopic();
+                }
             }
 
             if (_schema == null) {
@@ -96,7 +97,7 @@ public class Batch extends AbstractBatch {
             waitForRoomInCommitBacklog();
             incrementInflightWriteLogCommits();
             _committer.commit(
-                    _batch,
+                    new ArrayList<>(_batch),
                     _destination,
                     new ArrayList<>(_ackCallbacks),
                     new ArrayList<>(_recordMetadata),

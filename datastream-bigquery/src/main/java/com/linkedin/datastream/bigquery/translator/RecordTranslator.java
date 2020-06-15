@@ -40,7 +40,11 @@ public class RecordTranslator {
         Map.Entry<String, Object> result = new AbstractMap.SimpleEntry<>(name, null);
         switch (avroSchema.getType()) {
             case STRING:
-                result = new AbstractMap.SimpleEntry<>(name, record);
+                if (record instanceof Utf8) {
+                    result = new AbstractMap.SimpleEntry<>(name, String.valueOf(record));
+                } else {
+                    result = new AbstractMap.SimpleEntry<>(name, record);
+                }
                 break;
             case FLOAT:
             case DOUBLE:
@@ -250,9 +254,7 @@ public class RecordTranslator {
 
         result.put(rec.getKey(), rec.getValue());
 
-        return InsertAllRequest.RowToInsert.of(
-                result
-        );
+        return InsertAllRequest.RowToInsert.of(result);
     }
 
 }

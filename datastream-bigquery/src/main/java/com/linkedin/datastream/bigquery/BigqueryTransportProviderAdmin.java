@@ -27,8 +27,6 @@ public class BigqueryTransportProviderAdmin implements TransportProviderAdmin {
 
     private static final String CONFIG_COMMITTER_DOMAIN_PREFIX = "committer";
 
-    private static final String CONFIG_COMMITTER_CLASS = "class";
-
     private BigqueryTransportProvider _transportProvider;
 
     /**
@@ -41,9 +39,6 @@ public class BigqueryTransportProviderAdmin implements TransportProviderAdmin {
         VerifiableProperties committerProperties = new VerifiableProperties(tpProperties.getDomainProperties(
                 CONFIG_COMMITTER_DOMAIN_PREFIX, false));
 
-        BigqueryBatchCommitter committer = ReflectionUtils.createInstance(committerProperties.getString(
-                CONFIG_COMMITTER_CLASS), committerProperties);
-
         _transportProvider = new BigqueryTransportProvider.BigqueryTransportProviderBuilder()
                 .setTransportProviderName(transportProviderName)
                 .setBatchBuilderQueueSize(tpProperties.getInt(CONFIG_BATCHBUILDER_QUEUE_SIZE, 1000))
@@ -51,7 +46,7 @@ public class BigqueryTransportProviderAdmin implements TransportProviderAdmin {
                 .setMaxBatchSize(tpProperties.getInt(CONFIG_MAX_BATCH_SIZE, 100000))
                 .setMaxBatchAge(tpProperties.getInt(CONFIG_MAX_BATCH_AGE, 500))
                 .setMaxInflightBatchCommits(tpProperties.getInt(CONFIG_MAX_INFLIGHT_COMMITS, 1))
-                .setCommitter(committer)
+                .setCommitter(new BigqueryBatchCommitter(committerProperties))
                 .setTranslatorProperties(new VerifiableProperties(tpProperties.getDomainProperties(CONFIG_TRANSLATOR_DOMAIN_PREFIX)))
                 .build();
     }

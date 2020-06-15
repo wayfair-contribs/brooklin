@@ -28,7 +28,6 @@ public class BigqueryTransportProvider extends AbstractBufferedTransportProvider
     private static final Logger LOG = LoggerFactory.getLogger(BigqueryTransportProvider.class.getName());
 
     private final ScheduledExecutorService _scheduler = new ScheduledThreadPoolExecutor(1);
-    private CopyOnWriteArrayList<BatchBuilder> _batchBuilders = new CopyOnWriteArrayList<>();
     private final BigqueryBatchCommitter _committer;
 
 
@@ -39,7 +38,7 @@ public class BigqueryTransportProvider extends AbstractBufferedTransportProvider
 
         // initialize and start object builders
         for (int i = 0; i < builder._batchBuilderCount; i++) {
-            _objectBuilders.add(new BatchBuilder(
+            _batchBuilders.add(new BatchBuilder(
                     builder._maxBatchSize,
                     builder._maxBatchAge,
                     builder._maxInflightBatchCommits,
@@ -54,7 +53,7 @@ public class BigqueryTransportProvider extends AbstractBufferedTransportProvider
         // send periodic flush signal to commit stale objects
         _scheduler.scheduleAtFixedRate(
                 () -> {
-                    for (AbstractBatchBuilder objectBuilder: _objectBuilders) {
+                    for (AbstractBatchBuilder objectBuilder: _batchBuilders) {
                         LOG.info("Try flush signal sent.");
                         objectBuilder.assign(new com.linkedin.datastream.common.Package.PackageBuilder().buildTryFlushSignalPackage());
                     }

@@ -25,7 +25,7 @@ public abstract class AbstractBufferedTransportProvider  implements TransportPro
 
     protected String _transportProviderName;
     protected final ScheduledExecutorService _scheduler = new ScheduledThreadPoolExecutor(1);
-    protected CopyOnWriteArrayList<AbstractBatchBuilder> _objectBuilders = new CopyOnWriteArrayList<>();
+    protected CopyOnWriteArrayList<AbstractBatchBuilder> _batchBuilders = new CopyOnWriteArrayList<>();
 
     protected volatile boolean _isClosed;
 
@@ -35,7 +35,7 @@ public abstract class AbstractBufferedTransportProvider  implements TransportPro
     }
 
     private void delegate(final com.linkedin.datastream.common.Package aPackage) {
-        this._objectBuilders.get(Math.abs(aPackage.hashCode() % _objectBuilders.size())).assign(aPackage);
+        this._batchBuilders.get(Math.abs(aPackage.hashCode() % _batchBuilders.size())).assign(aPackage);
     }
 
     @Override
@@ -64,11 +64,11 @@ public abstract class AbstractBufferedTransportProvider  implements TransportPro
 
         try {
             LOG.info("Closing the transport provider {}", _transportProviderName);
-            for (AbstractBatchBuilder objectBuilder : _objectBuilders) {
+            for (AbstractBatchBuilder objectBuilder : _batchBuilders) {
                 objectBuilder.shutdown();
             }
 
-            for (AbstractBatchBuilder objectBuilder : _objectBuilders) {
+            for (AbstractBatchBuilder objectBuilder : _batchBuilders) {
                 try {
                     objectBuilder.join();
                 } catch (InterruptedException e) {
@@ -85,9 +85,9 @@ public abstract class AbstractBufferedTransportProvider  implements TransportPro
 
     @Override
     public void flush() {
-        LOG.info("Forcing flush on object builders.");
+        LOG.info("Forcing flush on batch builders.");
         List<com.linkedin.datastream.common.Package> flushSignalPackages = new ArrayList<>();
-        for (final AbstractBatchBuilder objectBuilder : _objectBuilders) {
+        for (final AbstractBatchBuilder objectBuilder : _batchBuilders) {
             final com.linkedin.datastream.common.Package aPackage = new com.linkedin.datastream.common.Package.PackageBuilder().buildFroceFlushSignalPackage();
             flushSignalPackages.add(aPackage);
             objectBuilder.assign(aPackage);

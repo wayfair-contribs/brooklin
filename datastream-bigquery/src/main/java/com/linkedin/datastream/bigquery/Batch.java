@@ -1,37 +1,55 @@
 package com.linkedin.datastream.bigquery;
 
-import com.google.api.services.bigquery.model.TableDataInsertAllRequest;
-import com.linkedin.datastream.common.DatastreamRecordMetadata;
-import com.linkedin.datastream.common.Package;
-import com.linkedin.datastream.common.VerifiableProperties;
-import com.linkedin.datastream.server.api.transport.buffered.AbstractBatch;
-import com.linkedin.datastream.server.api.transport.buffered.BatchCommitter;
-
 import java.util.ArrayList;
 import java.util.List;
 
+import com.google.cloud.bigquery.InsertAllRequest;
+import com.google.cloud.bigquery.Schema;
+import com.linkedin.datastream.bigquery.translator.RecordTranslator;
+import com.linkedin.datastream.bigquery.translator.SchemaTranslator;
+import com.linkedin.datastream.common.DatastreamRecordMetadata;
+import com.linkedin.datastream.common.Package;
+import com.linkedin.datastream.common.SchemaRegistry;
+import com.linkedin.datastream.common.VerifiableProperties;
+import com.linkedin.datastream.server.api.transport.buffered.AbstractBatch;
+
+import io.confluent.kafka.serializers.KafkaAvroDeserializer;
+
+import org.apache.avro.generic.GenericRecord;
+
 public class Batch extends AbstractBatch {
+
+    private static final String CONFIG_SCHEMA_REGISTRY = "schemaRegistry";
 
     private final int _maxBatchSize;
     private final int _maxBatchAge;
-    private final VerifiableProperties _conversionProperties;
-    private final BatchCommitter<TableDataInsertAllRequest.Rows> _committer;
+    private final BigqueryBatchCommitter _committer;
 
-    private final List<TableDataInsertAllRequest.Rows> _batch;
+    private final List<InsertAllRequest.RowToInsert> _batch;
     private long _batchCreateTimeStamp;
+
+    private org.apache.avro.Schema _avroSchema;
+    private Schema _schema;
+    private SchemaRegistry _schemaRegistry;
+    private String _destination;
+    private KafkaAvroDeserializer _deserializer;
 
     public Batch(int maxBatchSize,
                  int maxBatchAge,
                  int maxInflightWriteLogCommits,
                  VerifiableProperties conversionProperties,
-                 BatchCommitter<TableDataInsertAllRequest.Rows> committer) {
+                 BigqueryBatchCommitter committer) {
         super(maxInflightWriteLogCommits);
         this._maxBatchSize = maxBatchSize;
         this._maxBatchAge = maxBatchAge;
-        this._conversionProperties = conversionProperties;
         this._committer = committer;
         this._batch = new ArrayList<>();
-        _batchCreateTimeStamp = System.currentTimeMillis();
+        this._batchCreateTimeStamp = System.currentTimeMillis();
+        this._schema = null;
+        this._destination = null;
+        this._schemaRegistry = new SchemaRegistry(
+                new VerifiableProperties(conversionProperties.getDomainProperties(CONFIG_SCHEMA_REGISTRY)));
+        this._deserializer = _schemaRegistry.getDeserializer();
     }
 
     private void reset() {
@@ -44,7 +62,24 @@ public class Batch extends AbstractBatch {
 
     public void write(Package aPackage) throws InterruptedException {
         if (aPackage.isDataPackage()) {
-            _batch.add();
+
+            if (_destination == null) {
+                String[] datasetTableSuffix = aPackage.getDestination().split("/");
+                _destination = datasetTableSuffix[0] + "/" + aPackage.getTopic() + datasetTableSuffix[1];
+            }
+
+            if (_schema == null) {
+                _avroSchema = _schemaRegistry.getSchemaByTopic(aPackage.getTopic());
+                _schema = SchemaTranslator.translate(_avroSchema);
+                _committer.setDestTableSchema(_destination, _schema);
+            }
+
+            _batch.add(RecordTranslator.translate(
+                            (GenericRecord) _deserializer.deserialize(
+                                    aPackage.getTopic(),
+                                    (byte[]) aPackage.getRecord().getValue()),
+                            _avroSchema));
+
             _ackCallbacks.add(aPackage.getAckCallback());
             _recordMetadata.add(new DatastreamRecordMetadata(aPackage.getCheckpoint(),
                     aPackage.getTopic(),
@@ -73,6 +108,5 @@ public class Batch extends AbstractBatch {
                 waitForCommitBacklogToClear();
             }
         }
-
     }
 }

@@ -12,6 +12,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Properties;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 
 import org.apache.kafka.common.utils.Time;
 
@@ -199,6 +200,10 @@ public class EmbeddedKafkaCluster {
     @Override
     public long hiResClockMs() {
       return TimeUnit.NANOSECONDS.toMillis(nanoseconds());
+    }
+
+    @Override
+    public void waitObject(Object obj, Supplier<Boolean> condition, long timeoutMs) throws InterruptedException {
     }
   }
 }

@@ -13,7 +13,7 @@ public interface BatchCommitter <T> {
      * @param recordMetadata metadata associated to each record in the file
      * @param callback callback that needs to be called to notify the Object Builder about the completion of the commit
      */
-    void commit(List<T> batch,
+    void commit(T batch,
                 String destination,
                 List<SendCallback> ackCallbacks,
                 List<DatastreamRecordMetadata> recordMetadata,

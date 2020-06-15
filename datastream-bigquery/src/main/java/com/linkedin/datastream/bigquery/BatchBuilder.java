@@ -8,7 +8,6 @@ import com.linkedin.datastream.common.Package;
 import com.linkedin.datastream.common.VerifiableProperties;
 import com.linkedin.datastream.server.api.transport.buffered.AbstractBatch;
 import com.linkedin.datastream.server.api.transport.buffered.AbstractBatchBuilder;
-import com.linkedin.datastream.server.api.transport.buffered.BatchCommitter;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,12 +20,12 @@ public class BatchBuilder extends AbstractBatchBuilder {
     private final int _maxBatchAge;
     private final int _maxInflightCommits;
     private final VerifiableProperties _conversionProperties;
-    private final BatchCommitter _batchCommitter;
+    private final BigqueryBatchCommitter _batchCommitter;
 
     public BatchBuilder(int maxBatchSize,
                         int maxBatchAge,
                         int maxInflightCommits,
-                        BatchCommitter batchCommitter,
+                        BigqueryBatchCommitter batchCommitter,
                         int queueSize,
                         VerifiableProperties conversionProperties) {
         super(queueSize);

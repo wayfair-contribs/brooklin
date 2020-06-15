@@ -27,16 +27,10 @@ public class BigqueryTransportProvider extends AbstractBufferedTransportProvider
 
     private static final Logger LOG = LoggerFactory.getLogger(BigqueryTransportProvider.class.getName());
 
-    private static final String KAFKA_ORIGIN_TOPIC = "kafka-origin-topic";
-    private static final String KAFKA_ORIGIN_PARTITION = "kafka-origin-partition";
-    private static final String KAFKA_ORIGIN_OFFSET = "kafka-origin-offset";
-
-    private String _transportProviderName;
     private final ScheduledExecutorService _scheduler = new ScheduledThreadPoolExecutor(1);
     private CopyOnWriteArrayList<BatchBuilder> _batchBuilders = new CopyOnWriteArrayList<>();
-    private final BatchCommitter<TableDataInsertAllRequest.Rows> _committer;
+    private final BigqueryBatchCommitter _committer;
 
-    private volatile boolean _isClosed;
 
     private BigqueryTransportProvider(BigqueryTransportProviderBuilder builder) {
         super(builder._transportProviderName);
@@ -51,7 +45,7 @@ public class BigqueryTransportProvider extends AbstractBufferedTransportProvider
                     builder._maxInflightBatchCommits,
                     builder._committer,
                     builder._batchBuilderQueueSize,
-                    builder._conversionProperties));
+                    builder._translatorProperties));
         }
         for (AbstractBatchBuilder batchBuilder : _batchBuilders) {
             batchBuilder.start();
@@ -85,8 +79,8 @@ public class BigqueryTransportProvider extends AbstractBufferedTransportProvider
         private int _maxBatchSize;
         private int _maxBatchAge;
         private int _maxInflightBatchCommits;
-        private BatchCommitter _committer;
-        private VerifiableProperties _conversionProperties;
+        private BigqueryBatchCommitter _committer;
+        private VerifiableProperties _translatorProperties;
 
         /**
          * Set the name of the transport provider
@@ -139,13 +133,13 @@ public class BigqueryTransportProvider extends AbstractBufferedTransportProvider
         /**
          * Set batch committer
          */
-        public BigqueryTransportProviderBuilder setCommitter(BatchCommitter<TableDataInsertAllRequest.Rows> committer) {
+        public BigqueryTransportProviderBuilder setCommitter(BigqueryBatchCommitter committer) {
             this._committer = committer;
             return this;
         }
 
-        public BigqueryTransportProviderBuilder setConversionProperties(VerifiableProperties conversionProperties) {
-            this._conversionProperties = conversionProperties;
+        public BigqueryTransportProviderBuilder setTranslatorProperties(VerifiableProperties translatorProperties) {
+            this._translatorProperties = translatorProperties;
             return this;
         }
 

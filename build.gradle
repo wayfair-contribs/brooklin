@@ -362,14 +362,23 @@ project(':datastream-tools') {
 project(':datastream-client') {
 
   dependencies {
-    compile project(path: ':datastream-common', configuration: 'restClient')
-
     compile "com.linkedin.pegasus:restli-client:$pegasusVersion"
     compile "com.linkedin.pegasus:r2-netty:$pegasusVersion"
+    compile "com.linkedin.pegasus:generator:$pegasusVersion"
+    compile "com.linkedin.pegasus:r2-netty:$pegasusVersion"
+    compile "com.linkedin.pegasus:restli-common:$pegasusVersion"
+    compile "com.linkedin.pegasus:restli-server:$pegasusVersion"
+    compile "com.linkedin.pegasus:restli-tools:$pegasusVersion"
+    compile "com.linkedin.pegasus:gradle-plugins:$pegasusVersion"
+    compile "com.linkedin.pegasus:restli-netty-standalone:$pegasusVersion"
+    compile "com.linkedin.pegasus:restli-server-standalone:$pegasusVersion"
+
     compile "org.apache.avro:avro:$avroVersion"
 
     compile project(':datastream-common')
     compile project(':datastream-utils')
+
+    compile project(path: ':datastream-common', configuration: 'restClient')
 
     testCompile project(':datastream-testcommon')
     testCompile project(':datastream-kafka')

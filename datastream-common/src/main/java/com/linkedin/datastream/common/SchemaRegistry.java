@@ -8,15 +8,18 @@ package com.linkedin.datastream.common;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-import io.confluent.kafka.schemaregistry.client.CachedSchemaRegistryClient;
-import io.confluent.kafka.schemaregistry.client.SchemaRegistryClient;
-import io.confluent.kafka.serializers.KafkaAvroDeserializer;
-
 import org.apache.avro.Schema;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.confluent.kafka.schemaregistry.client.CachedSchemaRegistryClient;
+import io.confluent.kafka.schemaregistry.client.SchemaRegistryClient;
+import io.confluent.kafka.serializers.KafkaAvroDeserializer;
+
+/**
+ * This class is a wrapper to schema registry client.
+ */
 public class SchemaRegistry {
     private static final Logger LOG = LoggerFactory.getLogger(SchemaRegistry.class);
     private final static Map<String, Schema> SCHEMAS = new ConcurrentHashMap<>();
@@ -30,6 +33,10 @@ public class SchemaRegistry {
     private String _schemaNameSuffix;
     private SchemaRegistryClient _schemaRegistryClient;
 
+    /**
+     * Constructor for SchemaRegistry.
+     * @param props schema registry client properties.
+     */
     public SchemaRegistry(VerifiableProperties props) {
         this._schemaRegistryURL = props.getString(CONFIG_SCHEMA_REGISTRY_URL);
         this._schemaRegistryClient = new CachedSchemaRegistryClient(_schemaRegistryURL, Integer.MAX_VALUE);
@@ -37,6 +44,11 @@ public class SchemaRegistry {
         this._deserializer = new KafkaAvroDeserializer(_schemaRegistryClient);
     }
 
+    /**
+     * Returns avro schema of a given topic.
+     * @param topic topic name
+     * @return avro schema
+     */
     public Schema getSchemaByTopic(String topic) {
         String key = _schemaRegistryURL + "-" + topic;
         Schema schema =  SCHEMAS.computeIfAbsent(key, (k) -> {
@@ -55,6 +67,10 @@ public class SchemaRegistry {
         return schema;
     }
 
+    /**
+     * returns the deserializer which shares the underlying schema registry client
+     * @return avro deserializer
+     */
     public KafkaAvroDeserializer getDeserializer() {
         return _deserializer;
     }

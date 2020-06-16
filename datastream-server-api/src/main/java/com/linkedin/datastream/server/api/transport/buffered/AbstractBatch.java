@@ -1,3 +1,8 @@
+/**
+ *  Copyright 2020 Wayfair LLC. All rights reserved.
+ *  Licensed under the BSD 2-Clause License. See the LICENSE file in the project root for license information.
+ *  See the NOTICE file in the project root for additional information regarding copyright ownership.
+ */
 package com.linkedin.datastream.server.api.transport.buffered;
 
 import java.util.ArrayList;
@@ -76,5 +81,9 @@ public abstract class AbstractBatch {
         }
     }
 
+    /**
+     * Adds a record to the batch
+     * @param aPackage package to be buffered for eventual commit.
+     */
     public abstract void write(Package aPackage) throws InterruptedException;
 }

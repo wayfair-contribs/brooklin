@@ -1,25 +1,9 @@
+/**
+ *  Copyright 2020 Wayfair LLC. All rights reserved.
+ *  Licensed under the BSD 2-Clause License. See the LICENSE file in the project root for license information.
+ *  See the NOTICE file in the project root for additional information regarding copyright ownership.
+ */
 package com.linkedin.datastream.bigquery;
-
-import com.google.auth.Credentials;
-import com.google.auth.oauth2.GoogleCredentials;
-import com.google.cloud.bigquery.InsertAllRequest;
-import com.google.cloud.bigquery.Schema;
-import com.google.cloud.bigquery.BigQuery;
-import com.google.cloud.bigquery.BigQueryException;
-import com.google.cloud.bigquery.BigQueryOptions;
-import com.google.cloud.bigquery.TableId;
-import com.google.cloud.bigquery.TableInfo;
-import com.google.cloud.bigquery.TableDefinition;
-import com.google.cloud.bigquery.InsertAllResponse;
-import com.google.cloud.bigquery.StandardTableDefinition;
-import com.linkedin.datastream.common.DatastreamRecordMetadata;
-import com.linkedin.datastream.common.DatastreamTransientException;
-import com.linkedin.datastream.common.SendCallback;
-import com.linkedin.datastream.common.VerifiableProperties;
-import com.linkedin.datastream.server.api.transport.buffered.BatchCommitter;
-import com.linkedin.datastream.server.api.transport.buffered.CommitCallback;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
@@ -27,8 +11,39 @@ import java.io.IOException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.google.auth.Credentials;
+import com.google.auth.oauth2.GoogleCredentials;
+
+import com.google.cloud.bigquery.BigQuery;
+import com.google.cloud.bigquery.BigQueryException;
+import com.google.cloud.bigquery.BigQueryOptions;
+import com.google.cloud.bigquery.InsertAllRequest;
+import com.google.cloud.bigquery.InsertAllResponse;
+import com.google.cloud.bigquery.Schema;
+import com.google.cloud.bigquery.StandardTableDefinition;
+import com.google.cloud.bigquery.TableDefinition;
+import com.google.cloud.bigquery.TableId;
+import com.google.cloud.bigquery.TableInfo;
+
+import com.linkedin.datastream.common.DatastreamRecordMetadata;
+import com.linkedin.datastream.common.DatastreamTransientException;
+import com.linkedin.datastream.common.SendCallback;
+import com.linkedin.datastream.common.VerifiableProperties;
+import com.linkedin.datastream.server.api.transport.buffered.BatchCommitter;
+import com.linkedin.datastream.server.api.transport.buffered.CommitCallback;
+
+/**
+ * This class commits submitted batches to BQ tables.
+ */
 public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequest.RowToInsert>> {
     private static final Logger LOG = LoggerFactory.getLogger(BigqueryBatchCommitter.class.getName());
 
@@ -42,6 +57,10 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
 
     private final BigQuery _bigquery;
 
+    /**
+     * Constructor for BigqueryBatchCommitter
+     * @param properties configuration options
+     */
     public BigqueryBatchCommitter(VerifiableProperties properties) {
         String credentialsPath = properties.getString("credentialsPath");
         String projectId = properties.getString("projectId");
@@ -59,16 +78,11 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
             throw new RuntimeException(e);
         }
 
-
         this._numOfCommitterThreads = properties.getInt(CONFIG_THREADS, 1);
         this._executor = Executors.newFixedThreadPool(_numOfCommitterThreads);
 
         this._destTableSchemas = new ConcurrentHashMap<>();
         this._destTableCreated = new HashMap<>();
-    }
-
-    public void setDestTableSchema(String dest, Schema schema) {
-        _destTableSchemas.putIfAbsent(dest, schema);
     }
 
     private synchronized void createTableIfAbsent(String destination) {
@@ -91,6 +105,15 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
             LOG.info("Failed to create table {}", destination);
             throw e;
         }
+    }
+
+    /**
+     * Allows to submit table schema for a lazy auto table creation
+     * @param dest dataset and table
+     * @param schema table schema
+     */
+    public void setDestTableSchema(String dest, Schema schema) {
+        _destTableSchemas.putIfAbsent(dest, schema);
     }
 
     @Override
@@ -125,7 +148,7 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
                 }
                 if (response != null && response.hasErrors()) {
                     exception = null;
-                    Long key = new Long(i);
+                    Long key = Long.valueOf(i);
                     if (response.getInsertErrors().containsKey(key)) {
                         LOG.warn("Failed to insert a row {} {}", i, response.getInsertErrors().get(key));
                         exception = new DatastreamTransientException(response.getInsertErrors().get(key).toString());

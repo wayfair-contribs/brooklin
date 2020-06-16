@@ -1,10 +1,18 @@
+/**
+ *  Copyright 2020 Wayfair LLC. All rights reserved.
+ *  Licensed under the BSD 2-Clause License. See the LICENSE file in the project root for license information.
+ *  See the NOTICE file in the project root for additional information regarding copyright ownership.
+ */
 package com.linkedin.datastream.server.api.transport.buffered;
+
+import java.util.List;
 
 import com.linkedin.datastream.common.DatastreamRecordMetadata;
 import com.linkedin.datastream.common.SendCallback;
 
-import java.util.List;
-
+/**
+ * Implement this interface to commit buffered writes to the destination.
+ */
 public interface BatchCommitter <T> {
     /**
      * Commits the file to cloud storage

@@ -1,4 +1,15 @@
+/**
+ *  Copyright 2020 Wayfair LLC. All rights reserved.
+ *  Licensed under the BSD 2-Clause License. See the LICENSE file in the project root for license information.
+ *  See the NOTICE file in the project root for additional information regarding copyright ownership.
+ */
 package com.linkedin.datastream.server.api.transport.buffered;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 
 import com.linkedin.datastream.common.BrooklinEnvelope;
 import com.linkedin.datastream.common.BrooklinEnvelopeMetadataConstants;
@@ -7,15 +18,13 @@ import com.linkedin.datastream.common.Record;
 import com.linkedin.datastream.common.SendCallback;
 import com.linkedin.datastream.server.DatastreamProducerRecord;
 import com.linkedin.datastream.server.api.transport.TransportProvider;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledThreadPoolExecutor;
-
+/**
+ * Extend this abstract class to implement buffered writes to the destination.
+ */
 public abstract class AbstractBufferedTransportProvider  implements TransportProvider {
     protected static final Logger LOG = LoggerFactory.getLogger(AbstractBufferedTransportProvider.class.getName());
 
@@ -23,7 +32,7 @@ public abstract class AbstractBufferedTransportProvider  implements TransportPro
     protected static final String KAFKA_ORIGIN_PARTITION = "kafka-origin-partition";
     protected static final String KAFKA_ORIGIN_OFFSET = "kafka-origin-offset";
 
-    protected String _transportProviderName;
+    protected final String _transportProviderName;
     protected final ScheduledExecutorService _scheduler = new ScheduledThreadPoolExecutor(1);
     protected CopyOnWriteArrayList<AbstractBatchBuilder> _batchBuilders = new CopyOnWriteArrayList<>();
 
@@ -41,7 +50,7 @@ public abstract class AbstractBufferedTransportProvider  implements TransportPro
     @Override
     public void send(String destination, DatastreamProducerRecord record, SendCallback onComplete) {
         for (final BrooklinEnvelope env :  record.getEvents()) {
-            final com.linkedin.datastream.common.Package aPackage = new com.linkedin.datastream.common.Package.PackageBuilder()
+            final Package aPackage = new com.linkedin.datastream.common.Package.PackageBuilder()
                     .setRecord(new Record(env.getKey(), env.getValue()))
                     .setTopic(env.getMetadata().get(KAFKA_ORIGIN_TOPIC))
                     .setPartition(env.getMetadata().get(KAFKA_ORIGIN_PARTITION))

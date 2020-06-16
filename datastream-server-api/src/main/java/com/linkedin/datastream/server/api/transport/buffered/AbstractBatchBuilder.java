@@ -1,13 +1,19 @@
+/**
+ *  Copyright 2020 Wayfair LLC. All rights reserved.
+ *  Licensed under the BSD 2-Clause License. See the LICENSE file in the project root for license information.
+ *  See the NOTICE file in the project root for additional information regarding copyright ownership.
+ */
 package com.linkedin.datastream.server.api.transport.buffered;
-
-import com.linkedin.datastream.common.Package;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
+
+import com.linkedin.datastream.common.Package;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public abstract class AbstractBatchBuilder extends Thread {
 

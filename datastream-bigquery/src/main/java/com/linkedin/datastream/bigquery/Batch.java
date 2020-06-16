@@ -1,10 +1,20 @@
+/**
+ *  Copyright 2020 Wayfair LLC. All rights reserved.
+ *  Licensed under the BSD 2-Clause License. See the LICENSE file in the project root for license information.
+ *  See the NOTICE file in the project root for additional information regarding copyright ownership.
+ */
 package com.linkedin.datastream.bigquery;
 
 import java.util.ArrayList;
 import java.util.List;
 
+import org.apache.avro.generic.GenericRecord;
+
 import com.google.cloud.bigquery.InsertAllRequest;
 import com.google.cloud.bigquery.Schema;
+
+import io.confluent.kafka.serializers.KafkaAvroDeserializer;
+
 import com.linkedin.datastream.bigquery.translator.RecordTranslator;
 import com.linkedin.datastream.bigquery.translator.SchemaTranslator;
 import com.linkedin.datastream.common.DatastreamRecordMetadata;
@@ -12,10 +22,9 @@ import com.linkedin.datastream.common.Package;
 import com.linkedin.datastream.common.SchemaRegistry;
 import com.linkedin.datastream.server.api.transport.buffered.AbstractBatch;
 
-import io.confluent.kafka.serializers.KafkaAvroDeserializer;
-
-import org.apache.avro.generic.GenericRecord;
-
+/**
+ * This class populates a batch of BQ rows to be committed.
+ */
 public class Batch extends AbstractBatch {
 
     private final int _maxBatchSize;
@@ -31,6 +40,14 @@ public class Batch extends AbstractBatch {
     private String _destination;
     private KafkaAvroDeserializer _deserializer;
 
+    /**
+     * Constructor for Batch.
+     * @param maxBatchSize any batch bigger than this threshold will be committed to BQ.
+     * @param maxBatchAge any batch older than this threshold will be committed to BQ.
+     * @param maxInflightWriteLogCommits maximum allowed batches in the commit backlog
+     * @param schemaRegistry schema registry client object
+     * @param committer committer object
+     */
     public Batch(int maxBatchSize,
                  int maxBatchAge,
                  int maxInflightWriteLogCommits,
@@ -56,6 +73,7 @@ public class Batch extends AbstractBatch {
         _batchCreateTimeStamp = System.currentTimeMillis();
     }
 
+    @Override
     public void write(Package aPackage) throws InterruptedException {
         if (aPackage.isDataPackage()) {
 

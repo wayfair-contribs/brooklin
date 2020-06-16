@@ -5,16 +5,14 @@
  */
 package com.linkedin.datastream.bigquery;
 
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.linkedin.datastream.common.VerifiableProperties;
 import com.linkedin.datastream.server.api.transport.buffered.AbstractBatchBuilder;
 import com.linkedin.datastream.server.api.transport.buffered.AbstractBufferedTransportProvider;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * This is a Bigquery Transport provider that writes events to specified bigquery table.
@@ -23,9 +21,7 @@ public class BigqueryTransportProvider extends AbstractBufferedTransportProvider
 
     private static final Logger LOG = LoggerFactory.getLogger(BigqueryTransportProvider.class.getName());
 
-    private final ScheduledExecutorService _scheduler = new ScheduledThreadPoolExecutor(1);
     private final BigqueryBatchCommitter _committer;
-
 
     private BigqueryTransportProvider(BigqueryTransportProviderBuilder builder) {
         super(builder._transportProviderName);
@@ -133,6 +129,9 @@ public class BigqueryTransportProvider extends AbstractBufferedTransportProvider
             return this;
         }
 
+        /**
+         * Set translator configuration options
+         */
         public BigqueryTransportProviderBuilder setTranslatorProperties(VerifiableProperties translatorProperties) {
             this._translatorProperties = translatorProperties;
             return this;

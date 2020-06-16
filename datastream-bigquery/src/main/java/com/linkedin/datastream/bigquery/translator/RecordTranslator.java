@@ -1,6 +1,25 @@
+/**
+ *  Copyright 2020 Wayfair LLC. All rights reserved.
+ *  Licensed under the BSD 2-Clause License. See the LICENSE file in the project root for license information.
+ *  See the NOTICE file in the project root for additional information regarding copyright ownership.
+ */
 package com.linkedin.datastream.bigquery.translator;
 
-import com.google.cloud.bigquery.InsertAllRequest;
+import java.math.BigDecimal;
+import java.math.BigInteger;
+
+import java.nio.ByteBuffer;
+
+import java.text.SimpleDateFormat;
+
+import java.util.AbstractMap;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.TimeZone;
+
 import org.apache.avro.LogicalTypes;
 import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericArray;
@@ -8,12 +27,11 @@ import org.apache.avro.generic.GenericFixed;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.avro.util.Utf8;
 
-import java.math.BigDecimal;
-import java.math.BigInteger;
-import java.nio.ByteBuffer;
-import java.text.SimpleDateFormat;
-import java.util.*;
+import com.google.cloud.bigquery.InsertAllRequest;
 
+/**
+ * This class translates given avro record into BQ row object.
+ */
 public class RecordTranslator {
 
     private static boolean isPrimitiveType(Schema.Type type) {
@@ -52,7 +70,7 @@ public class RecordTranslator {
                 break;
             case INT:
                 if (avroSchema.getLogicalType() != null && avroSchema.getLogicalType().getName().toLowerCase().equals("date")) {
-                    result = new AbstractMap.SimpleEntry<>(name, new Date((Integer) record));
+                    result = new AbstractMap.SimpleEntry<>(name, new Date((Long) record));
                     break;
                 } else if (avroSchema.getLogicalType() != null && avroSchema.getLogicalType().getName().toLowerCase().equals("time")) {
                     result = new AbstractMap.SimpleEntry<>(name, formatTime((Long) record, "HH:mm:ss", false));
@@ -63,7 +81,7 @@ public class RecordTranslator {
                 }
             case LONG:
                 if (avroSchema.getLogicalType() != null && avroSchema.getLogicalType().getName().toLowerCase().equals("time")) {
-                    result = new AbstractMap.SimpleEntry<>(name,formatTime((Long) record, "HH:mm:ss", true));
+                    result = new AbstractMap.SimpleEntry<>(name, formatTime((Long) record, "HH:mm:ss", true));
                     break;
                 } else if (avroSchema.getLogicalType() != null && avroSchema.getLogicalType().getName().toLowerCase().equals("timestamp")) {
                     result = new AbstractMap.SimpleEntry<>(name, formatTime((Long) record, "yyyy-MM-dd HH:mm:ss", true));
@@ -78,6 +96,8 @@ public class RecordTranslator {
             case BYTES:
                 result = new AbstractMap.SimpleEntry<>(name, record);
                 break;
+            default:
+                return result;
         }
         return result;
     }
@@ -200,49 +220,52 @@ public class RecordTranslator {
 
     @SuppressWarnings("unchecked")
     private static Map.Entry<String, Object> translateRecord(GenericRecord avroRecord, Schema avroSchema, String name) {
-        Map.Entry<String, Object> record = new AbstractMap.SimpleEntry<>(name, null);
-        Map<String, Object> subRecords = new HashMap<>();
-        SimpleDateFormat fmt = null;
 
-        switch (avroSchema.getType()) {
-            case RECORD:
-                for (org.apache.avro.Schema.Field avroField: avroSchema.getFields()) {
-                    if (isPrimitiveType(avroField.schema().getType())) {
-                        Map.Entry<String, Object> entry = translatePrimitiveTypeObject(avroRecord.get(avroField.name()), avroField.schema(), avroField.name());
-                        subRecords.put(entry.getKey(), entry.getValue());
-                    } else if (avroField.schema().getType() == Schema.Type.RECORD) {
-                        if (avroRecord.get(avroField.name()) != null) {
-                            Map.Entry<String, Object> subRecord =
-                                    translateRecord((GenericRecord) avroRecord.get(avroField.name()),
-                                            avroField.schema(),
-                                            avroField.name());
-                            if (subRecord != null) {
-                                subRecords.put(subRecord.getKey(), subRecord.getValue());
-                            }
-                        }
-                    } else if (avroField.schema().getType() == Schema.Type.UNION) {
-                        Map.Entry<String, Object> entry = translateUnionTypeObject(avroRecord.get(avroField.name()), avroField.schema(), avroField.name());
-                        subRecords.put(entry.getKey(), entry.getValue());
-                    } else if (avroField.schema().getType() == Schema.Type.FIXED) {
-                        Map.Entry<String, Object> entry = translateFixedTypeObject(avroRecord.get(avroField.name()), avroField.schema(), avroField.name());
-                        subRecords.put(entry.getKey(), entry.getValue());
-                    } else if (avroField.schema().getType() == Schema.Type.MAP) {
-                        Map.Entry<String, Object> entry = translateMapTypeObject(avroRecord.get(avroField.name()), avroField.schema(), avroField.name());
-                        subRecords.put(entry.getKey(), entry.getValue());
-                    } else if (avroField.schema().getType() == Schema.Type.ENUM) {
-                        Map.Entry<String, Object> entry = translateEnumTypeObject(avroRecord.get(avroField.name()), avroField.name());
-                        subRecords.put(entry.getKey(), entry.getValue());
-                    } else if (avroField.schema().getType() == Schema.Type.ARRAY) {
-                        Map.Entry<String, Object> entry = translateArrayTypeObject(avroRecord.get(avroField.name()), avroField.schema(), avroField.name());
-                        subRecords.put(entry.getKey(), entry.getValue());
+        if (avroSchema.getType() != Schema.Type.RECORD) {
+            throw new IllegalArgumentException("Object is not a Avro Record type.");
+        }
+
+        Map<String, Object> subRecords = new HashMap<>();
+        for (org.apache.avro.Schema.Field avroField: avroSchema.getFields()) {
+            if (isPrimitiveType(avroField.schema().getType())) {
+                Map.Entry<String, Object> entry = translatePrimitiveTypeObject(avroRecord.get(avroField.name()), avroField.schema(), avroField.name());
+                subRecords.put(entry.getKey(), entry.getValue());
+            } else if (avroField.schema().getType() == Schema.Type.RECORD) {
+                if (avroRecord.get(avroField.name()) != null) {
+                    Map.Entry<String, Object> subRecord =
+                            translateRecord((GenericRecord) avroRecord.get(avroField.name()),
+                                    avroField.schema(),
+                                    avroField.name());
+                    if (subRecord != null) {
+                        subRecords.put(subRecord.getKey(), subRecord.getValue());
                     }
                 }
-                record = new AbstractMap.SimpleEntry<>(name, subRecords);
-                break;
+            } else if (avroField.schema().getType() == Schema.Type.UNION) {
+                Map.Entry<String, Object> entry = translateUnionTypeObject(avroRecord.get(avroField.name()), avroField.schema(), avroField.name());
+                subRecords.put(entry.getKey(), entry.getValue());
+            } else if (avroField.schema().getType() == Schema.Type.FIXED) {
+                Map.Entry<String, Object> entry = translateFixedTypeObject(avroRecord.get(avroField.name()), avroField.schema(), avroField.name());
+                subRecords.put(entry.getKey(), entry.getValue());
+            } else if (avroField.schema().getType() == Schema.Type.MAP) {
+                Map.Entry<String, Object> entry = translateMapTypeObject(avroRecord.get(avroField.name()), avroField.schema(), avroField.name());
+                subRecords.put(entry.getKey(), entry.getValue());
+            } else if (avroField.schema().getType() == Schema.Type.ENUM) {
+                Map.Entry<String, Object> entry = translateEnumTypeObject(avroRecord.get(avroField.name()), avroField.name());
+                subRecords.put(entry.getKey(), entry.getValue());
+            } else if (avroField.schema().getType() == Schema.Type.ARRAY) {
+                Map.Entry<String, Object> entry = translateArrayTypeObject(avroRecord.get(avroField.name()), avroField.schema(), avroField.name());
+                subRecords.put(entry.getKey(), entry.getValue());
+            }
         }
-        return record;
+        return new AbstractMap.SimpleEntry<>(name, subRecords);
     }
 
+    /**
+     * translate given avro record into BQ row object.
+     * @param avroRecord avro record
+     * @param avroSchema avro schema
+     * @return BQ row
+     */
     public static InsertAllRequest.RowToInsert translate(GenericRecord avroRecord, Schema avroSchema) {
         if (avroSchema.getType() != org.apache.avro.Schema.Type.RECORD) {
             throw new IllegalArgumentException("The root of the record's schema should be a RECORD type.");

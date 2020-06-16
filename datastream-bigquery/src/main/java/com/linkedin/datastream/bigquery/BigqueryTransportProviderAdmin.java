@@ -1,4 +1,15 @@
+/**
+ *  Copyright 2020 Wayfair LLC. All rights reserved.
+ *  Licensed under the BSD 2-Clause License. See the LICENSE file in the project root for license information.
+ *  See the NOTICE file in the project root for additional information regarding copyright ownership.
+ */
 package com.linkedin.datastream.bigquery;
+
+import java.time.Duration;
+import java.util.Properties;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.linkedin.datastream.common.Datastream;
 import com.linkedin.datastream.common.DatastreamDestination;
@@ -7,12 +18,15 @@ import com.linkedin.datastream.server.DatastreamTask;
 import com.linkedin.datastream.server.api.connector.DatastreamValidationException;
 import com.linkedin.datastream.server.api.transport.TransportProvider;
 import com.linkedin.datastream.server.api.transport.TransportProviderAdmin;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
-import java.time.Duration;
-import java.util.Properties;
-
+/**
+ * {@link TransportProviderAdmin} implementation for {@link BigqueryTransportProvider}
+ *
+ * <ul>
+ *  <li>Initializes {@link BigqueryTransportProvider}</li>
+ *  <li>Sets up the correct destination connection string/bq table</li>
+ * </ul>
+ */
 public class BigqueryTransportProviderAdmin implements TransportProviderAdmin {
     private static final Logger LOG = LoggerFactory.getLogger(BigqueryTransportProviderAdmin.class);
 

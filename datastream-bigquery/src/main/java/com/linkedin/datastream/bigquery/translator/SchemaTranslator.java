@@ -1,13 +1,21 @@
+/**
+ *  Copyright 2020 Wayfair LLC. All rights reserved.
+ *  Licensed under the BSD 2-Clause License. See the LICENSE file in the project root for license information.
+ *  See the NOTICE file in the project root for additional information regarding copyright ownership.
+ */
 package com.linkedin.datastream.bigquery.translator;
+
+import java.util.ArrayList;
+import java.util.List;
 
 import com.google.cloud.bigquery.Field;
 import com.google.cloud.bigquery.FieldList;
 import com.google.cloud.bigquery.Schema;
 import com.google.cloud.bigquery.StandardSQLTypeName;
 
-import java.util.ArrayList;
-import java.util.List;
-
+/**
+ * This class translates given avro schema into BQ schema.
+ */
 public class SchemaTranslator {
 
     private static class FieldTypePair {
@@ -20,20 +28,11 @@ public class SchemaTranslator {
         }
     }
 
-    public static Schema translate(org.apache.avro.Schema avroSchema) {
-
-        if (avroSchema.getType() != org.apache.avro.Schema.Type.RECORD) {
-            throw new IllegalArgumentException("The root of the record's schema should be a RECORD type.");
-        }
-
-        return Schema.of(translateSchema(avroSchema, avroSchema.getName()).field);
-    }
-
     private static FieldTypePair translateSchema(org.apache.avro.Schema avroSchema, String name) {
 
-        Field.Builder fieldBuilder = null;
-        StandardSQLTypeName type = null;
-        FieldTypePair fieldTypePair = null;
+        Field.Builder fieldBuilder;
+        StandardSQLTypeName type;
+        FieldTypePair fieldTypePair;
 
         List<Field> fieldList = new ArrayList<>();
 
@@ -136,12 +135,28 @@ public class SchemaTranslator {
                 type = StandardSQLTypeName.STRING;
                 fieldBuilder = Field.newBuilder(name, type);
                 break;
+            default:
+                throw new IllegalArgumentException("Avro type not recognized.");
         }
 
         if (avroSchema.getDoc() != null) {
             fieldBuilder.setDescription(avroSchema.getDoc());
         }
         return new FieldTypePair(fieldBuilder.build(), type);
+    }
+
+    /**
+     * Translate given avro schema into BQ schema
+     * @param avroSchema avro schema
+     * @return BQ schema
+     */
+    public static Schema translate(org.apache.avro.Schema avroSchema) {
+
+        if (avroSchema.getType() != org.apache.avro.Schema.Type.RECORD) {
+            throw new IllegalArgumentException("The root of the record's schema should be a RECORD type.");
+        }
+
+        return Schema.of(translateSchema(avroSchema, avroSchema.getName()).field);
     }
 }
 

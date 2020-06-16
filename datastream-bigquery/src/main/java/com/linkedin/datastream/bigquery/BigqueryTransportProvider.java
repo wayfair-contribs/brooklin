@@ -5,17 +5,13 @@
  */
 package com.linkedin.datastream.bigquery;
 
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
-import com.google.api.services.bigquery.model.TableDataInsertAllRequest;
-
 import com.linkedin.datastream.common.VerifiableProperties;
 import com.linkedin.datastream.server.api.transport.buffered.AbstractBatchBuilder;
 import com.linkedin.datastream.server.api.transport.buffered.AbstractBufferedTransportProvider;
-import com.linkedin.datastream.server.api.transport.buffered.BatchCommitter;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

@@ -2,7 +2,6 @@ package com.linkedin.datastream.bigquery;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 import com.google.cloud.bigquery.InsertAllRequest;
 import com.google.cloud.bigquery.Schema;

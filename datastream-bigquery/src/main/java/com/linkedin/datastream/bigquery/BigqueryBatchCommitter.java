@@ -2,7 +2,16 @@ package com.linkedin.datastream.bigquery;
 
 import com.google.auth.Credentials;
 import com.google.auth.oauth2.GoogleCredentials;
-import com.google.cloud.bigquery.*;
+import com.google.cloud.bigquery.InsertAllRequest;
+import com.google.cloud.bigquery.Schema;
+import com.google.cloud.bigquery.BigQuery;
+import com.google.cloud.bigquery.BigQueryException;
+import com.google.cloud.bigquery.BigQueryOptions;
+import com.google.cloud.bigquery.TableId;
+import com.google.cloud.bigquery.TableInfo;
+import com.google.cloud.bigquery.TableDefinition;
+import com.google.cloud.bigquery.InsertAllResponse;
+import com.google.cloud.bigquery.StandardTableDefinition;
 import com.linkedin.datastream.common.DatastreamRecordMetadata;
 import com.linkedin.datastream.common.DatastreamTransientException;
 import com.linkedin.datastream.common.SendCallback;
@@ -92,22 +101,18 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
                        List<DatastreamRecordMetadata> recordMetadata,
                        CommitCallback callback) {
         final Runnable committerTask = () -> {
-
             Exception exception = null;
-
             InsertAllResponse response = null;
 
             try {
                 createTableIfAbsent(destination);
 
                 String[] datasetTable = destination.split("/");
-
                 TableId tableId = TableId.of(datasetTable[0], datasetTable[1]);
 
                 response = _bigquery.insertAll(
                         InsertAllRequest.newBuilder(tableId, batch)
                                 .build());
-                LOG.info("Response {}", response);
             } catch (Exception e) {
                 LOG.warn("Failed to insert a rows {}", response);
                 exception = new DatastreamTransientException(e);
@@ -120,9 +125,10 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
                 }
                 if (response != null && response.hasErrors()) {
                     exception = null;
-                    if (response.getInsertErrors().containsKey(i)) {
-                        LOG.warn("Failed to insert a row {} {}", i, response.getInsertErrors().get(i));
-                        exception = new DatastreamTransientException(response.getInsertErrors().get(i).toString());
+                    Long key = new Long(i);
+                    if (response.getInsertErrors().containsKey(key)) {
+                        LOG.warn("Failed to insert a row {} {}", i, response.getInsertErrors().get(key));
+                        exception = new DatastreamTransientException(response.getInsertErrors().get(key).toString());
                     }
                     ackCallbacks.get(i).onCompletion(recordMetadata.get(i), exception);
                 }

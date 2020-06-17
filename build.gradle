@@ -142,8 +142,6 @@ project(':datastream-common') {
     compile "com.linkedin.pegasus:restli-server:$pegasusVersion"
     compile "com.intellij:annotations:$intellijAnnotationsVersion"
     compile "com.google.guava:guava:$guavaVersion"
-    compile "io.confluent:kafka-avro-serializer:$kafkaSchemaRegistryClientVersion"
-    compile "io.confluent:kafka-schema-registry-client:$kafkaSchemaRegistryClientVersion"
     testCompile "org.mockito:mockito-core:$mockitoVersion"
   }
 }
@@ -365,13 +363,6 @@ project(':datastream-client') {
     compile "com.linkedin.pegasus:restli-client:$pegasusVersion"
     compile "com.linkedin.pegasus:r2-netty:$pegasusVersion"
     compile "com.linkedin.pegasus:generator:$pegasusVersion"
-    compile "com.linkedin.pegasus:r2-netty:$pegasusVersion"
-    compile "com.linkedin.pegasus:restli-common:$pegasusVersion"
-    compile "com.linkedin.pegasus:restli-server:$pegasusVersion"
-    compile "com.linkedin.pegasus:restli-tools:$pegasusVersion"
-    compile "com.linkedin.pegasus:gradle-plugins:$pegasusVersion"
-    compile "com.linkedin.pegasus:restli-netty-standalone:$pegasusVersion"
-    compile "com.linkedin.pegasus:restli-server-standalone:$pegasusVersion"
 
     compile "org.apache.avro:avro:$avroVersion"
 

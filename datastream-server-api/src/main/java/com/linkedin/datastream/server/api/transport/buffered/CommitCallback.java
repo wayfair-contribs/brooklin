@@ -5,9 +5,12 @@
  */
 package com.linkedin.datastream.server.api.transport.buffered;
 
+/**
+ * callback interface to acknowledge batch commits
+ */
 public interface CommitCallback {
     /**
-     * Callback method that needs to be called when the object commit completes
+     * Callback method that needs to be called when the batch commit completes
      */
     void commited();
 }

@@ -10,11 +10,14 @@ import java.util.Map;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 
-import com.linkedin.datastream.common.Package;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.linkedin.datastream.common.Package;
+
+/**
+ * Extend this class to implement batch builder for buffered producer
+ */
 public abstract class AbstractBatchBuilder extends Thread {
 
     protected static final Logger LOG = LoggerFactory.getLogger(AbstractBatchBuilder.class.getName());

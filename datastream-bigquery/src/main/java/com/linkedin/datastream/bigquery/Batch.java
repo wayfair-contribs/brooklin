@@ -19,7 +19,6 @@ import com.linkedin.datastream.bigquery.translator.RecordTranslator;
 import com.linkedin.datastream.bigquery.translator.SchemaTranslator;
 import com.linkedin.datastream.common.DatastreamRecordMetadata;
 import com.linkedin.datastream.common.Package;
-import com.linkedin.datastream.common.SchemaRegistry;
 import com.linkedin.datastream.server.api.transport.buffered.AbstractBatch;
 
 /**

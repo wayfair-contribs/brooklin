@@ -3,7 +3,7 @@
  *  Licensed under the BSD 2-Clause License. See the LICENSE file in the project root for license information.
  *  See the NOTICE file in the project root for additional information regarding copyright ownership.
  */
-package com.linkedin.datastream.common;
+package com.linkedin.datastream.bigquery;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -16,6 +16,8 @@ import org.slf4j.LoggerFactory;
 import io.confluent.kafka.schemaregistry.client.CachedSchemaRegistryClient;
 import io.confluent.kafka.schemaregistry.client.SchemaRegistryClient;
 import io.confluent.kafka.serializers.KafkaAvroDeserializer;
+
+import com.linkedin.datastream.common.VerifiableProperties;
 
 /**
  * This class is a wrapper to schema registry client.

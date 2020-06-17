@@ -12,8 +12,9 @@ import com.linkedin.datastream.common.SendCallback;
 
 /**
  * Implement this interface to commit buffered writes to the destination.
+ * @param <T> collection of records that represents a batch
  */
-public interface BatchCommitter <T> {
+public interface BatchCommitter<T> {
     /**
      * Commits the file to cloud storage
      * @param destination destination bucket

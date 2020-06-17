@@ -8,13 +8,16 @@ package com.linkedin.datastream.server.api.transport.buffered;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import com.linkedin.datastream.common.DatastreamRecordMetadata;
 import com.linkedin.datastream.common.Package;
 import com.linkedin.datastream.common.SendCallback;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
+/**
+ * Extend this class to implement batch object for specific datastore producer
+ */
 public abstract class AbstractBatch {
     protected static final Logger LOG = LoggerFactory.getLogger(AbstractBatch.class.getName());
 

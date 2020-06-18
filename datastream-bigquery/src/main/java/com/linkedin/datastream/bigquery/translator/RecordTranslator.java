@@ -66,7 +66,7 @@ public class RecordTranslator {
                 break;
             case FLOAT:
             case DOUBLE:
-                result = new AbstractMap.SimpleEntry<>(name, record);
+                result = new AbstractMap.SimpleEntry<>(name, (Double) record);
                 break;
             case INT:
                 if (avroSchema.getLogicalType() != null && avroSchema.getLogicalType().getName().toLowerCase().equals("date")) {
@@ -87,7 +87,7 @@ public class RecordTranslator {
                     result = new AbstractMap.SimpleEntry<>(name, formatTime((Long) record, "yyyy-MM-dd HH:mm:ss", true));
                     break;
                 } else {
-                    result = new AbstractMap.SimpleEntry<>(name, record);
+                    result = new AbstractMap.SimpleEntry<>(name, (Long) record);
                     break;
                 }
             case BOOLEAN:

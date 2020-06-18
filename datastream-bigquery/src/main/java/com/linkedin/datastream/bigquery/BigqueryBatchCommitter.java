@@ -97,7 +97,7 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
             TableDefinition tableDefinition = StandardTableDefinition.of(_destTableSchemas.get(destination));
             TableInfo tableInfo = TableInfo.newBuilder(tableId, tableDefinition).build();
             if (_bigquery.getTable(tableId) != null) {
-                LOG.info("Table {} already exist", destination);
+                LOG.debug("Table {} already exist", destination);
                 return;
             }
             _bigquery.create(tableInfo);
@@ -118,7 +118,6 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
     }
 
     @Override
-    @SuppressWarnings("unchecked")
     public void commit(List<InsertAllRequest.RowToInsert> batch,
                        String destination,
                        List<SendCallback> ackCallbacks,
@@ -135,6 +134,7 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
                 String[] datasetTable = destination.split("/");
                 TableId tableId = TableId.of(datasetTable[0], datasetTable[1]);
 
+                LOG.info("Committing a batch to dataset {} and table {}", datasetTable[0], datasetTable[1]);
                 response = _bigquery.insertAll(
                         InsertAllRequest.newBuilder(tableId, batch)
                                 .build());

@@ -70,7 +70,11 @@ public class BatchBuilder extends AbstractBatchBuilder {
             try {
                 if (aPackage.isDataPackage()) {
                     _registry.computeIfAbsent(aPackage.getTopic() + "-" + aPackage.getPartition(),
-                            key -> new Batch(_maxBatchSize, _maxBatchAge, _maxInflightCommits, _schemaRegistry, _committer)).write(aPackage);
+                            key -> new Batch(_maxBatchSize,
+                                    _maxBatchAge,
+                                    _maxInflightCommits,
+                                    _schemaRegistry,
+                                    _committer)).write(aPackage);
                 } else {
                     // broadcast signal
                     for (Map.Entry<String, AbstractBatch> entry : _registry.entrySet()) {

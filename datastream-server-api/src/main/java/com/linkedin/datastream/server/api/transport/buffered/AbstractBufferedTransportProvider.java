@@ -49,7 +49,7 @@ public abstract class AbstractBufferedTransportProvider  implements TransportPro
     @Override
     public void send(String destination, DatastreamProducerRecord record, SendCallback onComplete) {
         for (final BrooklinEnvelope env :  record.getEvents()) {
-            final Package aPackage = new com.linkedin.datastream.common.Package.PackageBuilder()
+            final Package aPackage = new Package.PackageBuilder()
                     .setRecord(new Record(env.getKey(), env.getValue()))
                     .setTopic(env.getMetadata().get(KAFKA_ORIGIN_TOPIC))
                     .setPartition(env.getMetadata().get(KAFKA_ORIGIN_PARTITION))
@@ -96,7 +96,7 @@ public abstract class AbstractBufferedTransportProvider  implements TransportPro
         LOG.info("Forcing flush on batch builders.");
         List<com.linkedin.datastream.common.Package> flushSignalPackages = new ArrayList<>();
         for (final AbstractBatchBuilder objectBuilder : _batchBuilders) {
-            final com.linkedin.datastream.common.Package aPackage = new com.linkedin.datastream.common.Package.PackageBuilder().buildFroceFlushSignalPackage();
+            final Package aPackage = new Package.PackageBuilder().buildFroceFlushSignalPackage();
             flushSignalPackages.add(aPackage);
             objectBuilder.assign(aPackage);
         }

@@ -134,7 +134,7 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
                 String[] datasetTable = destination.split("/");
                 TableId tableId = TableId.of(datasetTable[0], datasetTable[1]);
 
-                LOG.info("Committing a batch to dataset {} and table {}", datasetTable[0], datasetTable[1]);
+                LOG.debug("Committing a batch to dataset {} and table {}", datasetTable[0], datasetTable[1]);
                 response = _bigquery.insertAll(
                         InsertAllRequest.newBuilder(tableId, batch)
                                 .build());

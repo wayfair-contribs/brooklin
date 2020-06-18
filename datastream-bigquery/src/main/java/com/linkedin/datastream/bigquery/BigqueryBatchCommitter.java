@@ -38,6 +38,7 @@ import com.linkedin.datastream.common.DatastreamRecordMetadata;
 import com.linkedin.datastream.common.DatastreamTransientException;
 import com.linkedin.datastream.common.SendCallback;
 import com.linkedin.datastream.common.VerifiableProperties;
+import com.linkedin.datastream.metrics.DynamicMetricsManager;
 import com.linkedin.datastream.server.api.transport.buffered.BatchCommitter;
 import com.linkedin.datastream.server.api.transport.buffered.CommitCallback;
 
@@ -122,6 +123,7 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
                        String destination,
                        List<SendCallback> ackCallbacks,
                        List<DatastreamRecordMetadata> recordMetadata,
+                       List<Long> sourceTimestamps,
                        CommitCallback callback) {
         final Runnable committerTask = () -> {
             Exception exception = null;
@@ -143,17 +145,37 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
 
             for (int i = 0; i < ackCallbacks.size(); i++) {
                 if (exception != null) {
+                    // entire batch failed
+                    DynamicMetricsManager.getInstance().createOrUpdateMeter(
+                            this.getClass().getSimpleName(),
+                            recordMetadata.get(i).getTopic(),
+                            "errorCount",
+                            1);
                     ackCallbacks.get(i).onCompletion(recordMetadata.get(i), exception);
-                    continue;
-                }
-                if (response != null && response.hasErrors()) {
-                    exception = null;
+                } else {
                     Long key = Long.valueOf(i);
-                    if (response.getInsertErrors().containsKey(key)) {
+                    if ( response != null && response.hasErrors() && response.getInsertErrors().containsKey(key)) {
                         LOG.warn("Failed to insert a row {} {}", i, response.getInsertErrors().get(key));
-                        exception = new DatastreamTransientException(response.getInsertErrors().get(key).toString());
+                        DynamicMetricsManager.getInstance().createOrUpdateMeter(
+                                this.getClass().getSimpleName(),
+                                recordMetadata.get(i).getTopic(),
+                                "errorCount",
+                                1);
+                        ackCallbacks.get(i).onCompletion(recordMetadata.get(i),
+                                new DatastreamTransientException(response.getInsertErrors().get(key).toString()));
+                    } else {
+                        DynamicMetricsManager.getInstance().createOrUpdateMeter(
+                                this.getClass().getSimpleName(),
+                                recordMetadata.get(i).getTopic(),
+                                "commitCount",
+                                1);
+                        DynamicMetricsManager.getInstance().createOrUpdateHistogram(
+                                this.getClass().getSimpleName(),
+                                recordMetadata.get(i).getTopic(),
+                                "eteLatency",
+                                System.currentTimeMillis() - sourceTimestamps.get(i));
+                        ackCallbacks.get(i).onCompletion(recordMetadata.get(i), null);
                     }
-                    ackCallbacks.get(i).onCompletion(recordMetadata.get(i), exception);
                 }
             }
 

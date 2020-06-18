@@ -69,6 +69,7 @@ public class Batch extends AbstractBatch {
         _destination = null;
         _ackCallbacks.clear();
         _recordMetadata.clear();
+        _sourceTimestamps.clear();
         _batchCreateTimeStamp = System.currentTimeMillis();
     }
 
@@ -101,6 +102,7 @@ public class Batch extends AbstractBatch {
             _recordMetadata.add(new DatastreamRecordMetadata(aPackage.getCheckpoint(),
                     aPackage.getTopic(),
                     aPackage.getPartition()));
+            _sourceTimestamps.add(aPackage.getTimestamp());
         } else if (aPackage.isTryFlushSignal() || aPackage.isForceFlushSignal()) {
             if (_batch.isEmpty()) {
                 LOG.debug("Nothing to flush.");
@@ -117,6 +119,7 @@ public class Batch extends AbstractBatch {
                     _destination,
                     new ArrayList<>(_ackCallbacks),
                     new ArrayList<>(_recordMetadata),
+                    new ArrayList<>(_sourceTimestamps),
                     () -> decrementInflightWriteLogCommitsAndNotify()
             );
             reset();

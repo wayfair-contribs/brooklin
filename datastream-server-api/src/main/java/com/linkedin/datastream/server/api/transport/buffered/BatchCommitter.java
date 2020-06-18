@@ -20,12 +20,14 @@ public interface BatchCommitter<T> {
      * @param destination destination bucket
      * @param ackCallbacks list of call backs associated to each record in the file that should be called in order
      * @param recordMetadata metadata associated to each record in the file
+     * @param sourceTimestamps source timestamps of the records in the batch
      * @param callback callback that needs to be called to notify the Object Builder about the completion of the commit
      */
     void commit(T batch,
                 String destination,
                 List<SendCallback> ackCallbacks,
                 List<DatastreamRecordMetadata> recordMetadata,
+                List<Long> sourceTimestamps,
                 CommitCallback callback);
 
     /**

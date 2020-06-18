@@ -26,7 +26,7 @@ public class Package extends PackageTracking {
     private String _topic;
     private int _partition;
     private long _offset;
-    private String _timestamp;
+    private long _timestamp;
     private String _checkpoint;
 
     private Package() {
@@ -92,7 +92,7 @@ public class Package extends PackageTracking {
      * get the timestamp
      * @return timestamp
      */
-    public String getTimestamp() {
+    public long getTimestamp() {
         validateCall();
         return _timestamp;
     }
@@ -161,7 +161,7 @@ public class Package extends PackageTracking {
         private String _topic;
         private String _partition;
         private String _offset;
-        private String _timestamp;
+        private long _timestamp;
         private String _destination;
         private SendCallback _ackCallback;
         private String _checkpoint;
@@ -201,7 +201,7 @@ public class Package extends PackageTracking {
         /**
          * Set source timestamp
          */
-        public PackageBuilder setTimestamp(String timestamp) {
+        public PackageBuilder setTimestamp(long timestamp) {
             this._timestamp = timestamp;
             return this;
         }

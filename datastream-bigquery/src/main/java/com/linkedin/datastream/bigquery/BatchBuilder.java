@@ -13,6 +13,7 @@ import org.slf4j.LoggerFactory;
 import com.linkedin.datastream.common.DatastreamRecordMetadata;
 import com.linkedin.datastream.common.Package;
 import com.linkedin.datastream.common.VerifiableProperties;
+import com.linkedin.datastream.metrics.DynamicMetricsManager;
 import com.linkedin.datastream.server.api.transport.buffered.AbstractBatch;
 import com.linkedin.datastream.server.api.transport.buffered.AbstractBatchBuilder;
 
@@ -81,6 +82,11 @@ public class BatchBuilder extends AbstractBatchBuilder {
                 Thread.currentThread().interrupt();
                 break;
             } catch (IllegalStateException e) {
+                DynamicMetricsManager.getInstance().createOrUpdateMeter(
+                        this.getClass().getSimpleName(),
+                        aPackage.getTopic(),
+                        "errorCount",
+                        1);
                 LOG.error("Unable to write to WriteLog {}", e);
                 aPackage.getAckCallback().onCompletion(new DatastreamRecordMetadata(
                         aPackage.getCheckpoint(), aPackage.getTopic(), aPackage.getPartition()), e);

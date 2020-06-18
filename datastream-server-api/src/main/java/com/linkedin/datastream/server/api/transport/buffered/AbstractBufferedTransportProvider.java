@@ -15,7 +15,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.linkedin.datastream.common.BrooklinEnvelope;
-import com.linkedin.datastream.common.BrooklinEnvelopeMetadataConstants;
 import com.linkedin.datastream.common.Package;
 import com.linkedin.datastream.common.Record;
 import com.linkedin.datastream.common.SendCallback;
@@ -55,7 +54,7 @@ public abstract class AbstractBufferedTransportProvider  implements TransportPro
                     .setTopic(env.getMetadata().get(KAFKA_ORIGIN_TOPIC))
                     .setPartition(env.getMetadata().get(KAFKA_ORIGIN_PARTITION))
                     .setOffset(env.getMetadata().get(KAFKA_ORIGIN_OFFSET))
-                    .setTimestamp(env.getMetadata().get(BrooklinEnvelopeMetadataConstants.EVENT_TIMESTAMP))
+                    .setTimestamp(record.getEventsSourceTimestamp())
                     .setDestination(destination)
                     .setAckCallBack(onComplete)
                     .setCheckpoint(record.getCheckpoint())
@@ -81,7 +80,7 @@ public abstract class AbstractBufferedTransportProvider  implements TransportPro
                 try {
                     objectBuilder.join();
                 } catch (InterruptedException e) {
-                    LOG.warn("An interrupt was raised during join() call on a Object Builder");
+                    LOG.warn("An interrupt was raised during join() call on a Batch Builder");
                     Thread.currentThread().interrupt();
                 }
             }

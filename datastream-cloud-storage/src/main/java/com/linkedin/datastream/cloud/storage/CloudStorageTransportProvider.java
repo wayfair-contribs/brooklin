@@ -21,7 +21,6 @@ import org.slf4j.LoggerFactory;
 import com.linkedin.datastream.cloud.storage.committer.ObjectCommitter;
 
 import com.linkedin.datastream.common.BrooklinEnvelope;
-import com.linkedin.datastream.common.BrooklinEnvelopeMetadataConstants;
 import com.linkedin.datastream.common.Package;
 import com.linkedin.datastream.common.Record;
 import com.linkedin.datastream.common.SendCallback;
@@ -118,7 +117,7 @@ public class CloudStorageTransportProvider implements TransportProvider {
                  .setTopic(env.getMetadata().get(KAFKA_ORIGIN_TOPIC))
                  .setPartition(env.getMetadata().get(KAFKA_ORIGIN_PARTITION))
                  .setOffset(env.getMetadata().get(KAFKA_ORIGIN_OFFSET))
-                 .setTimestamp(env.getMetadata().get(BrooklinEnvelopeMetadataConstants.EVENT_TIMESTAMP))
+                 .setTimestamp(record.getEventsSourceTimestamp())
                  .setDestination(destination)
                  .setAckCallBack(onComplete)
                  .setCheckpoint(record.getCheckpoint())

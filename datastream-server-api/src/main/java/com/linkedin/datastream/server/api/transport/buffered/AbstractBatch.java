@@ -29,12 +29,14 @@ public abstract class AbstractBatch {
     protected String _destination;
     protected List<SendCallback> _ackCallbacks;
     protected List<DatastreamRecordMetadata> _recordMetadata;
+    protected List<Long> _sourceTimestamps;
 
     protected AbstractBatch(int maxInflightWriteLogCommits) {
         this._maxInflightWriteLogCommits = maxInflightWriteLogCommits;
         this._destination = null;
         this._ackCallbacks = new ArrayList<>();
         this._recordMetadata = new ArrayList<>();
+        this._sourceTimestamps = new ArrayList<>();
         this._counterLock = new Object();
     }
 

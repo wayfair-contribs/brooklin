@@ -28,46 +28,77 @@ public class SchemaTranslator {
         }
     }
 
-    private static FieldTypePair translateSchema(org.apache.avro.Schema avroSchema, String name) {
+    private static FieldList translateRecordSchema(org.apache.avro.Schema avroSchema) {
+        FieldTypePair subFieldType;
+        List<Field> fieldList = new ArrayList<>();
+        for (org.apache.avro.Schema.Field avroField: avroSchema.getFields()) {
+            if (avroField.schema().getType() == org.apache.avro.Schema.Type.RECORD) {
+                fieldList.add(
+                        Field.newBuilder(
+                                avroField.name(),
+                                StandardSQLTypeName.STRUCT,
+                                translateRecordSchema(avroField.schema())).build());
+            } else {
+                subFieldType = translateNonRecordSchema(avroField.schema(), avroField.name());
+                if (subFieldType != null) {
+                    fieldList.add(subFieldType.field);
+                }
+            }
+        }
+        return FieldList.of(fieldList);
+    }
+
+    private static FieldTypePair translateNonRecordSchema(org.apache.avro.Schema avroSchema, String name) {
 
         Field.Builder fieldBuilder;
         StandardSQLTypeName type;
         FieldTypePair fieldTypePair;
+        FieldTypePair subFieldType;
 
         List<Field> fieldList = new ArrayList<>();
 
         switch (avroSchema.getType()) {
-            case RECORD:
-                for (org.apache.avro.Schema.Field avroField: avroSchema.getFields()) {
-                    fieldList.add(translateSchema(avroField.schema(), avroField.name()).field);
-                }
-                type = StandardSQLTypeName.STRUCT;
-                fieldBuilder = Field.newBuilder(avroSchema.getName(), type, FieldList.of(fieldList));
-                break;
             case ENUM:
                 type = StandardSQLTypeName.STRING;
-                fieldBuilder = Field.newBuilder(avroSchema.getName(), type);
+                fieldBuilder = Field.newBuilder(name, type);
                 break;
             case ARRAY:
                 if (avroSchema.getElementType().getType() == org.apache.avro.Schema.Type.ARRAY) {
                     throw new IllegalArgumentException("Array of array types are not supported.");
                 }
-                fieldTypePair = translateSchema(avroSchema.getElementType(), name);
-                type = fieldTypePair.type;
 
-                if (fieldTypePair.type == StandardSQLTypeName.STRUCT) {
-                    fieldBuilder = Field.newBuilder(name, type, fieldTypePair.field);
+                if (avroSchema.getElementType().getType() == org.apache.avro.Schema.Type.RECORD) {
+                    type = StandardSQLTypeName.STRUCT;
+                    fieldBuilder = Field.newBuilder(name,
+                            StandardSQLTypeName.STRUCT,
+                            translateRecordSchema(avroSchema.getElementType()));
                 } else {
+                    fieldTypePair = translateNonRecordSchema(avroSchema.getElementType(), name);
+                    if (fieldTypePair == null) {
+                        return null;
+                    }
+                    type = fieldTypePair.type;
                     fieldBuilder = Field.newBuilder(name, type);
                 }
                 fieldBuilder.setMode(Field.Mode.REPEATED);
                 break;
             case MAP:
                 type = StandardSQLTypeName.STRUCT;
-                fieldList = FieldList.of(
-                        Field.newBuilder("key", StandardSQLTypeName.STRING).build(),
-                        Field.newBuilder("value", translateSchema(avroSchema.getValueType(), name).type).build()
-                );
+                if (avroSchema.getValueType().getType() == org.apache.avro.Schema.Type.RECORD) {
+                    fieldList = FieldList.of(
+                            Field.newBuilder("key", StandardSQLTypeName.STRING).build(),
+                            Field.newBuilder("value", StandardSQLTypeName.STRUCT, translateRecordSchema(avroSchema.getValueType())).build()
+                    );
+                } else {
+                    subFieldType = translateNonRecordSchema(avroSchema.getValueType(), name);
+                    if (subFieldType == null) {
+                        return null;
+                    }
+                    fieldList = FieldList.of(
+                            Field.newBuilder("key", StandardSQLTypeName.STRING).build(),
+                            Field.newBuilder("value", subFieldType.type).build()
+                    );
+                }
                 fieldBuilder = Field.newBuilder(name, type, FieldList.of(fieldList));
                 break;
             case UNION:
@@ -75,15 +106,27 @@ public class SchemaTranslator {
                         (avroSchema.getTypes().get(0).getType() == org.apache.avro.Schema.Type.NULL ||
                                 avroSchema.getTypes().get(1).getType() == org.apache.avro.Schema.Type.NULL)
                 ) {
-                    fieldTypePair = translateSchema(avroSchema.getTypes().get(0), name);
-                    type = fieldTypePair.type;
-                    fieldBuilder = Field.newBuilder(name, type).setMode(Field.Mode.NULLABLE);
+                    org.apache.avro.Schema childSchema = (avroSchema.getTypes().get(0).getType() != org.apache.avro.Schema.Type.NULL) ?
+                            avroSchema.getTypes().get(0) : avroSchema.getTypes().get(1);
+
+                    if (childSchema.getType() == org.apache.avro.Schema.Type.RECORD) {
+                        type = StandardSQLTypeName.STRUCT;
+                        fieldBuilder = Field.newBuilder(name,
+                                StandardSQLTypeName.STRUCT,
+                                translateRecordSchema(childSchema)).setMode(Field.Mode.NULLABLE);
+                    } else {
+                        fieldTypePair = translateNonRecordSchema(childSchema, name);
+                        type = fieldTypePair.type;
+                        fieldBuilder = Field.newBuilder(name, fieldTypePair.type).setMode(Field.Mode.NULLABLE);
+                    }
+
                 } else {
                     for (org.apache.avro.Schema uType: avroSchema.getTypes()) {
-                        if (uType.getType() == org.apache.avro.Schema.Type.NULL) {
+                        subFieldType = translateNonRecordSchema(uType, name);
+                        if (subFieldType == null) {
                             continue;
                         }
-                        Field.Builder fb = Field.newBuilder(uType.getType().name().toLowerCase() + "_value", translateSchema(uType, name).type);
+                        Field.Builder fb = Field.newBuilder(uType.getType().name().toLowerCase() + "_value", subFieldType.type);
                         fb.setMode(Field.Mode.NULLABLE);
                         fieldList.add(fb.build());
                     }
@@ -92,12 +135,12 @@ public class SchemaTranslator {
                 }
                 break;
             case FIXED:
+            case BYTES:
                 if (avroSchema.getLogicalType() != null && avroSchema.getLogicalType().getName().toLowerCase().equals("decimal")) {
                     type = StandardSQLTypeName.NUMERIC;
                     fieldBuilder = Field.newBuilder(name, type);
                     break;
                 }
-            case BYTES:
                 // covers logical type Duration as well
                 type = StandardSQLTypeName.BYTES;
                 fieldBuilder = Field.newBuilder(name, type);
@@ -135,6 +178,8 @@ public class SchemaTranslator {
                 type = StandardSQLTypeName.STRING;
                 fieldBuilder = Field.newBuilder(name, type);
                 break;
+            case NULL:
+                return null;
             default:
                 throw new IllegalArgumentException("Avro type not recognized.");
         }
@@ -151,12 +196,10 @@ public class SchemaTranslator {
      * @return BQ schema
      */
     public static Schema translate(org.apache.avro.Schema avroSchema) {
-
         if (avroSchema.getType() != org.apache.avro.Schema.Type.RECORD) {
             throw new IllegalArgumentException("The root of the record's schema should be a RECORD type.");
         }
-
-        return Schema.of(translateSchema(avroSchema, avroSchema.getName()).field);
+        return Schema.of(translateRecordSchema(avroSchema));
     }
 }
 

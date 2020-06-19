@@ -58,6 +58,10 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
 
     private final BigQuery _bigquery;
 
+    private static String sanitizeTableName(String tableName) {
+        return tableName.replaceAll("[-.]", "_");
+    }
+
     /**
      * Constructor for BigqueryBatchCommitter
      * @param properties configuration options
@@ -93,7 +97,7 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
         String[] datasetTable = destination.split("/");
 
         try {
-            TableId tableId = TableId.of(datasetTable[0], datasetTable[1]);
+            TableId tableId = TableId.of(datasetTable[0], sanitizeTableName(datasetTable[1]));
             TableDefinition tableDefinition = StandardTableDefinition.of(_destTableSchemas.get(destination));
             TableInfo tableInfo = TableInfo.newBuilder(tableId, tableDefinition).build();
             if (_bigquery.getTable(tableId) != null) {
@@ -103,7 +107,7 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
             _bigquery.create(tableInfo);
             LOG.info("Table {} created successfully", destination);
         } catch (BigQueryException e) {
-            LOG.info("Failed to create table {}", destination);
+            LOG.warn("Failed to create table {} - {}", destination, e);
             throw e;
         }
     }
@@ -132,9 +136,9 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
                 createTableIfAbsent(destination);
 
                 String[] datasetTable = destination.split("/");
-                TableId tableId = TableId.of(datasetTable[0], datasetTable[1]);
+                TableId tableId = TableId.of(datasetTable[0], sanitizeTableName(datasetTable[1]));
 
-                LOG.debug("Committing a batch to dataset {} and table {}", datasetTable[0], datasetTable[1]);
+                LOG.debug("Committing a batch to dataset {} and table {}", datasetTable[0], sanitizeTableName(datasetTable[1]));
                 response = _bigquery.insertAll(
                         InsertAllRequest.newBuilder(tableId, batch)
                                 .build());

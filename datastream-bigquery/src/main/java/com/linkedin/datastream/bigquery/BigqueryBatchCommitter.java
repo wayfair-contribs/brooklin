@@ -59,7 +59,7 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
     private final BigQuery _bigquery;
 
     private static String sanitizeTableName(String tableName) {
-        return tableName.replaceAll("[-.]", "_");
+        return tableName.replaceAll("[^A-Za-z0-9_]+", "_");
     }
 
     /**

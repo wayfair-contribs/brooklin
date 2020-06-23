@@ -33,11 +33,10 @@ public class SchemaTranslator {
         List<Field> fieldList = new ArrayList<>();
         for (org.apache.avro.Schema.Field avroField: avroSchema.getFields()) {
             if (avroField.schema().getType() == org.apache.avro.Schema.Type.RECORD) {
-                fieldList.add(
-                        Field.newBuilder(
-                                avroField.name(),
-                                StandardSQLTypeName.STRUCT,
-                                translateRecordSchema(avroField.schema())).build());
+                fieldList.add(Field.newBuilder(
+                        avroField.name(),
+                        StandardSQLTypeName.STRUCT,
+                        translateRecordSchema(avroField.schema())).setMode(Field.Mode.REQUIRED).build());
             } else {
                 subFieldType = translateNonRecordSchema(avroField.schema(), avroField.name());
                 if (subFieldType != null) {
@@ -54,6 +53,8 @@ public class SchemaTranslator {
         StandardSQLTypeName type;
         FieldTypePair fieldTypePair;
         FieldTypePair subFieldType;
+
+        Field.Mode mode = Field.Mode.REQUIRED;
 
         List<Field> fieldList = new ArrayList<>();
 
@@ -80,7 +81,7 @@ public class SchemaTranslator {
                     type = fieldTypePair.type;
                     fieldBuilder = Field.newBuilder(name, type);
                 }
-                fieldBuilder.setMode(Field.Mode.REPEATED);
+                mode = Field.Mode.REPEATED;
                 break;
             case MAP:
                 type = StandardSQLTypeName.STRUCT;
@@ -100,6 +101,7 @@ public class SchemaTranslator {
                     );
                 }
                 fieldBuilder = Field.newBuilder(name, type, FieldList.of(fieldList));
+                mode = Field.Mode.REPEATED;
                 break;
             case UNION:
                 if (avroSchema.getTypes().size() == 2 &&
@@ -113,17 +115,20 @@ public class SchemaTranslator {
                         type = StandardSQLTypeName.STRUCT;
                         fieldBuilder = Field.newBuilder(name,
                                 StandardSQLTypeName.STRUCT,
-                                translateRecordSchema(childSchema)).setMode(Field.Mode.NULLABLE);
+                                translateRecordSchema(childSchema));
                     } else {
                         fieldTypePair = translateNonRecordSchema(childSchema, name);
                         type = fieldTypePair.type;
-                        fieldBuilder = Field.newBuilder(name, fieldTypePair.type).setMode(Field.Mode.NULLABLE);
+                        fieldBuilder = Field.newBuilder(name, fieldTypePair.type);
                     }
+
+                    mode = Field.Mode.NULLABLE;
 
                 } else {
                     for (org.apache.avro.Schema uType: avroSchema.getTypes()) {
                         subFieldType = translateNonRecordSchema(uType, name);
                         if (subFieldType == null) {
+                            mode = Field.Mode.NULLABLE;
                             continue;
                         }
                         Field.Builder fb = Field.newBuilder(uType.getType().name().toLowerCase() + "_value", subFieldType.type);
@@ -187,7 +192,8 @@ public class SchemaTranslator {
         if (avroSchema.getDoc() != null) {
             fieldBuilder.setDescription(avroSchema.getDoc());
         }
-        return new FieldTypePair(fieldBuilder.build(), type);
+
+        return new FieldTypePair(fieldBuilder.setMode(mode).build(), type);
     }
 
     /**

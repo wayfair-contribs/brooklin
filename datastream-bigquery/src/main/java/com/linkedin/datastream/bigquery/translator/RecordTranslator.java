@@ -10,15 +10,12 @@ import java.math.BigInteger;
 
 import java.nio.ByteBuffer;
 
-import java.text.SimpleDateFormat;
-
 import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.TimeZone;
 
 import org.apache.avro.LogicalTypes;
 import org.apache.avro.Schema;
@@ -44,43 +41,35 @@ public class RecordTranslator {
                 type == Schema.Type.STRING);
     }
 
-    private static String formatTime(long time, String pattern, boolean microUnit) {
-        SimpleDateFormat fmt = new SimpleDateFormat(pattern);
-        fmt.setTimeZone(TimeZone.getTimeZone("UTC"));
-        if (microUnit) {
-            return fmt.format(new Date(time / 1000)) + "." + String.format("%06d", time % 1000000);
-        } else {
-            return fmt.format(new Date(time)) + "." + String.format("%06d", (time % 1000) * 1000);
-        }
-    }
-
     private static Map.Entry<String, Object> translatePrimitiveTypeObject(Object record, Schema avroSchema, String name) {
         Map.Entry<String, Object> result = new AbstractMap.SimpleEntry<>(name, null);
         switch (avroSchema.getType()) {
             case STRING:
-                result = new AbstractMap.SimpleEntry<>(name, String.valueOf(record));
-                break;
+                if (LogicalTypeIdentifier.isTimeType(avroSchema)) {
+                    result = new AbstractMap.SimpleEntry<>(name, LogicalTypeTranslator.translateTimeType(String.valueOf(record), avroSchema));
+                    break;
+                } else if (LogicalTypeIdentifier.isTimestampType(avroSchema)) {
+                    result = new AbstractMap.SimpleEntry<>(name, LogicalTypeTranslator.translateTimestampType(String.valueOf(record), avroSchema));
+                    break;
+                } else {
+                    result = new AbstractMap.SimpleEntry<>(name, String.valueOf(record));
+                    break;
+                }
             case FLOAT:
             case DOUBLE:
                 result = new AbstractMap.SimpleEntry<>(name, record);
                 break;
             case INT:
-                if (avroSchema.getLogicalType() != null && avroSchema.getLogicalType().getName().toLowerCase().equals("date")) {
-                    result = new AbstractMap.SimpleEntry<>(name, new Date((Long) record));
-                    break;
-                } else if (avroSchema.getLogicalType() != null && avroSchema.getLogicalType().getName().toLowerCase().equals("time")) {
-                    result = new AbstractMap.SimpleEntry<>(name, formatTime((Long) record, "HH:mm:ss", false));
-                    break;
-                } else if (avroSchema.getLogicalType() != null && avroSchema.getLogicalType().getName().toLowerCase().equals("timestamp")) {
-                    result = new AbstractMap.SimpleEntry<>(name, formatTime((Long) record, "yyyy-MM-dd HH:mm:ss", false));
+                if (LogicalTypeIdentifier.isDateType(avroSchema)) {
+                    result = new AbstractMap.SimpleEntry<>(name, LogicalTypeTranslator.translateDateType((Long) record));
                     break;
                 }
             case LONG:
-                if (avroSchema.getLogicalType() != null && avroSchema.getLogicalType().getName().toLowerCase().equals("time")) {
-                    result = new AbstractMap.SimpleEntry<>(name, formatTime((Long) record, "HH:mm:ss", true));
+                if (LogicalTypeIdentifier.isTimeType(avroSchema)) {
+                    result = new AbstractMap.SimpleEntry<>(name, LogicalTypeTranslator.translateTimeType((Long) record, avroSchema));
                     break;
-                } else if (avroSchema.getLogicalType() != null && avroSchema.getLogicalType().getName().toLowerCase().equals("timestamp")) {
-                    result = new AbstractMap.SimpleEntry<>(name, formatTime((Long) record, "yyyy-MM-dd HH:mm:ss", true));
+                } else if (LogicalTypeIdentifier.isTimestampType(avroSchema)) {
+                    result = new AbstractMap.SimpleEntry<>(name, LogicalTypeTranslator.translateTimestampType((Long) record, avroSchema));
                     break;
                 } else {
                     result = new AbstractMap.SimpleEntry<>(name, record);
@@ -90,7 +79,7 @@ public class RecordTranslator {
                 result = new AbstractMap.SimpleEntry<>(name, record);
                 break;
             case BYTES:
-                if (avroSchema.getLogicalType() != null && avroSchema.getLogicalType().getName().toLowerCase().equals("decimal")) {
+                if (LogicalTypeIdentifier.isDecimalType(avroSchema)) {
                     final LogicalTypes.Decimal decimalType = (LogicalTypes.Decimal) avroSchema.getLogicalType();
                     result = new AbstractMap.SimpleEntry<>(name, new BigDecimal(new BigInteger(((ByteBuffer) record).array()), decimalType.getScale()));
                 } else {
@@ -109,7 +98,7 @@ public class RecordTranslator {
 
     private static Map.Entry<String, Object> translateFixedTypeObject(Object record, Schema avroSchema, String name) {
         Map.Entry<String, Object> result;
-        if (avroSchema.getLogicalType() != null && avroSchema.getLogicalType().getName().toLowerCase().equals("decimal")) {
+        if (LogicalTypeIdentifier.isDecimalType(avroSchema)) {
             final LogicalTypes.Decimal decimalType = (LogicalTypes.Decimal) avroSchema.getLogicalType();
             result = new AbstractMap.SimpleEntry<>(name, new BigDecimal(new BigInteger(((GenericFixed) record).bytes()), decimalType.getScale()));
         } else {

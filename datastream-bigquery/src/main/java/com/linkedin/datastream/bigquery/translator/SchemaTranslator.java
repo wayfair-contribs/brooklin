@@ -141,7 +141,7 @@ public class SchemaTranslator {
                 break;
             case FIXED:
             case BYTES:
-                if (avroSchema.getLogicalType() != null && avroSchema.getLogicalType().getName().toLowerCase().equals("decimal")) {
+                if (LogicalTypeIdentifier.isDecimalType(avroSchema)) {
                     type = StandardSQLTypeName.NUMERIC;
                     fieldBuilder = Field.newBuilder(name, type);
                     break;
@@ -155,17 +155,17 @@ public class SchemaTranslator {
                 fieldBuilder = Field.newBuilder(name, type);
                 break;
             case INT:
-                if (avroSchema.getLogicalType() != null && avroSchema.getLogicalType().getName().toLowerCase().equals("date")) {
+                if (LogicalTypeIdentifier.isDateType(avroSchema)) {
                     type = StandardSQLTypeName.DATE;
                     fieldBuilder = Field.newBuilder(name, type);
                     break;
                 }
             case LONG:
-                if (avroSchema.getLogicalType() != null && avroSchema.getLogicalType().getName().toLowerCase().equals("time")) {
+                if (LogicalTypeIdentifier.isTimeType(avroSchema)) {
                     type = StandardSQLTypeName.TIME;
                     fieldBuilder = Field.newBuilder(name, type);
                     break;
-                } else if (avroSchema.getLogicalType() != null && avroSchema.getLogicalType().getName().toLowerCase().equals("timestamp")) {
+                } else if (LogicalTypeIdentifier.isTimestampType(avroSchema)) {
                     type = StandardSQLTypeName.TIMESTAMP;
                     fieldBuilder = Field.newBuilder(name, type);
                     break;
@@ -180,9 +180,19 @@ public class SchemaTranslator {
                 fieldBuilder = Field.newBuilder(name, type);
                 break;
             case STRING:
-                type = StandardSQLTypeName.STRING;
-                fieldBuilder = Field.newBuilder(name, type);
-                break;
+                if (LogicalTypeIdentifier.isZonedTime(avroSchema)) {
+                    type = StandardSQLTypeName.TIME;
+                    fieldBuilder = Field.newBuilder(name, type);
+                    break;
+                } else if (LogicalTypeIdentifier.isZonedTimestamp(avroSchema)) {
+                    type = StandardSQLTypeName.TIMESTAMP;
+                    fieldBuilder = Field.newBuilder(name, type);
+                    break;
+                } else {
+                    type = StandardSQLTypeName.STRING;
+                    fieldBuilder = Field.newBuilder(name, type);
+                    break;
+                }
             case NULL:
                 return null;
             default:

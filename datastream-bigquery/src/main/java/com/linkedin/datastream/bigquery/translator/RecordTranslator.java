@@ -12,7 +12,6 @@ import java.nio.ByteBuffer;
 
 import java.util.AbstractMap;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -50,6 +49,9 @@ public class RecordTranslator {
                     break;
                 } else if (LogicalTypeIdentifier.isTimestampType(avroSchema)) {
                     result = new AbstractMap.SimpleEntry<>(name, LogicalTypeTranslator.translateTimestampType(String.valueOf(record), avroSchema));
+                    break;
+                } else if (LogicalTypeIdentifier.isLSN(name)) {
+                    result = new AbstractMap.SimpleEntry<>(name, LogicalTypeTranslator.translateLSN(String.valueOf(record)));
                     break;
                 } else {
                     result = new AbstractMap.SimpleEntry<>(name, String.valueOf(record));

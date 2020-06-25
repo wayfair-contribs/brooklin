@@ -17,6 +17,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
+import com.google.cloud.bigquery.TimePartitioning;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -98,7 +99,10 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
 
         try {
             TableId tableId = TableId.of(datasetTable[0], sanitizeTableName(datasetTable[1]));
-            TableDefinition tableDefinition = StandardTableDefinition.of(_destTableSchemas.get(destination));
+            TableDefinition tableDefinition = StandardTableDefinition.newBuilder()
+                    .setSchema(_destTableSchemas.get(destination))
+                    .setTimePartitioning(TimePartitioning.of(TimePartitioning.Type.DAY))
+                    .build();
             TableInfo tableInfo = TableInfo.newBuilder(tableId, tableDefinition).build();
             if (_bigquery.getTable(tableId) != null) {
                 LOG.debug("Table {} already exist", destination);
@@ -156,6 +160,8 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
                             "errorCount",
                             1);
                     ackCallbacks.get(i).onCompletion(recordMetadata.get(i), exception);
+                    // force to check if table exists next time
+                    _destTableCreated.remove(destination);
                 } else {
                     Long key = Long.valueOf(i);
                     if ( response != null && response.hasErrors() && response.getInsertErrors().containsKey(key)) {

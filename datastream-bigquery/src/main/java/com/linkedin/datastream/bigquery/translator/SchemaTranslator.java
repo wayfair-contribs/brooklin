@@ -125,7 +125,7 @@ public class SchemaTranslator {
                     mode = Field.Mode.NULLABLE;
 
                 } else {
-                    for (org.apache.avro.Schema uType: avroSchema.getTypes()) {
+                    for (org.apache.avro.Schema uType : avroSchema.getTypes()) {
                         subFieldType = translateNonRecordSchema(uType, name);
                         if (subFieldType == null) {
                             mode = Field.Mode.NULLABLE;
@@ -188,7 +188,11 @@ public class SchemaTranslator {
                     type = StandardSQLTypeName.TIMESTAMP;
                     fieldBuilder = Field.newBuilder(name, type);
                     break;
-                } else {
+                } else if (LogicalTypeIdentifier.isLSN(name)) {
+                    type = StandardSQLTypeName.NUMERIC;
+                    fieldBuilder = Field.newBuilder(name, type);
+                    break;
+                }    else {
                     type = StandardSQLTypeName.STRING;
                     fieldBuilder = Field.newBuilder(name, type);
                     break;

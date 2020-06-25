@@ -5,6 +5,7 @@
  */
 package com.linkedin.datastream.bigquery.translator;
 
+import java.math.BigInteger;
 import java.text.SimpleDateFormat;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
@@ -60,5 +61,16 @@ class LogicalTypeTranslator {
             return TIME_FORMAT.format(Date.from(OffsetDateTime.parse(instant, DateTimeFormatter.ISO_OFFSET_TIME).toInstant()));
         }
         return null;
+    }
+
+    static byte[] translateLSN(String lsn) {
+        String[] parts = lsn.split(":");
+        if (parts.length != 3) {
+            return null;
+        }
+        return new BigInteger("0").add(BigInteger.valueOf(Long.parseLong(parts[2], 16))).
+                add(BigInteger.valueOf(Long.parseLong(parts[1], 16) *  100000L)).
+                add(BigInteger.valueOf(Long.parseLong(parts[0], 16)).multiply(BigInteger.valueOf(1000000000000000L))).
+                toByteArray();
     }
 }

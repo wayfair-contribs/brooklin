@@ -113,4 +113,8 @@ class LogicalTypeIdentifier {
         return (avroSchema.getProp(DEBEZIUM_LOGICAL_TYPE_PROPERTY) != null &&
                 avroSchema.getProp(DEBEZIUM_LOGICAL_TYPE_PROPERTY).equals(DEBEZIUM_ZONEDTIMESTAMP_NAME));
     }
+
+    static boolean isLSN(String name) {
+        return name.equals("change_lsn") || name.equals("commit_lsn");
+    }
 }

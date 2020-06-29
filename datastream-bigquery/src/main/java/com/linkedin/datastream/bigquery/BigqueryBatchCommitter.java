@@ -17,7 +17,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
-import com.google.cloud.bigquery.TimePartitioning;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -34,6 +33,7 @@ import com.google.cloud.bigquery.StandardTableDefinition;
 import com.google.cloud.bigquery.TableDefinition;
 import com.google.cloud.bigquery.TableId;
 import com.google.cloud.bigquery.TableInfo;
+import com.google.cloud.bigquery.TimePartitioning;
 
 import com.linkedin.datastream.common.DatastreamRecordMetadata;
 import com.linkedin.datastream.common.DatastreamTransientException;
@@ -164,7 +164,7 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
                     _destTableCreated.remove(destination);
                 } else {
                     Long key = Long.valueOf(i);
-                    if ( response != null && response.hasErrors() && response.getInsertErrors().containsKey(key)) {
+                    if (response != null && response.hasErrors() && response.getInsertErrors().containsKey(key)) {
                         LOG.warn("Failed to insert a row {} {}", i, response.getInsertErrors().get(key));
                         DynamicMetricsManager.getInstance().createOrUpdateMeter(
                                 this.getClass().getSimpleName(),

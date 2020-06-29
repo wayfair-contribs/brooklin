@@ -86,14 +86,18 @@ public class BatchBuilder extends AbstractBatchBuilder {
                 Thread.currentThread().interrupt();
                 break;
             } catch (Exception e) {
-                DynamicMetricsManager.getInstance().createOrUpdateMeter(
-                        this.getClass().getSimpleName(),
-                        aPackage.getTopic(),
-                        "errorCount",
-                        1);
-                LOG.error("Unable to write to batch {}", e);
-                aPackage.getAckCallback().onCompletion(new DatastreamRecordMetadata(
-                        aPackage.getCheckpoint(), aPackage.getTopic(), aPackage.getPartition()), e);
+                if (aPackage.isDataPackage()) {
+                    DynamicMetricsManager.getInstance().createOrUpdateMeter(
+                            this.getClass().getSimpleName(),
+                            aPackage.getTopic(),
+                            "errorCount",
+                            1);
+                    LOG.error("Unable to write to batch {}", e);
+                    aPackage.getAckCallback().onCompletion(new DatastreamRecordMetadata(
+                            aPackage.getCheckpoint(), aPackage.getTopic(), aPackage.getPartition()), e);
+                } else {
+                    LOG.error("Unable to process flush signal {}", e);
+                }
             }
         }
         LOG.info("Batch builder stopped.");

@@ -157,7 +157,7 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
                         this.getClass().getSimpleName(),
                         recordMetadata.get(0).getTopic(),
                         "insertAllExecTime",
-                        start - System.currentTimeMillis());
+                         System.currentTimeMillis() - start);
             } catch (Exception e) {
                 LOG.warn("Failed to insert a rows {}", response);
                 exception = new DatastreamTransientException(e);

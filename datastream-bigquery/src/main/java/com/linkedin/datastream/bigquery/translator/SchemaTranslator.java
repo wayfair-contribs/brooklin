@@ -188,11 +188,7 @@ public class SchemaTranslator {
                     type = StandardSQLTypeName.TIMESTAMP;
                     fieldBuilder = Field.newBuilder(name, type);
                     break;
-                } else if (LogicalTypeIdentifier.isLSN(name)) {
-                    type = StandardSQLTypeName.NUMERIC;
-                    fieldBuilder = Field.newBuilder(name, type);
-                    break;
-                }    else {
+                } else {
                     type = StandardSQLTypeName.STRING;
                     fieldBuilder = Field.newBuilder(name, type);
                     break;

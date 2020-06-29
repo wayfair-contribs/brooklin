@@ -50,9 +50,6 @@ public class RecordTranslator {
                 } else if (LogicalTypeIdentifier.isTimestampType(avroSchema)) {
                     result = new AbstractMap.SimpleEntry<>(name, LogicalTypeTranslator.translateTimestampType(String.valueOf(record), avroSchema));
                     break;
-                } else if (LogicalTypeIdentifier.isLSN(name)) {
-                    result = new AbstractMap.SimpleEntry<>(name, LogicalTypeTranslator.translateLSN(String.valueOf(record)));
-                    break;
                 } else {
                     result = new AbstractMap.SimpleEntry<>(name, String.valueOf(record));
                     break;

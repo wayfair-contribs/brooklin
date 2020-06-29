@@ -132,6 +132,10 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
                        List<DatastreamRecordMetadata> recordMetadata,
                        List<Long> sourceTimestamps,
                        CommitCallback callback) {
+        if (batch.isEmpty()) {
+            return;
+        }
+
         final Runnable committerTask = () -> {
             Exception exception = null;
             InsertAllResponse response = null;
@@ -143,9 +147,17 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
                 TableId tableId = TableId.of(datasetTable[0], sanitizeTableName(datasetTable[1]));
 
                 LOG.debug("Committing a batch to dataset {} and table {}", datasetTable[0], sanitizeTableName(datasetTable[1]));
+                long start = System.currentTimeMillis();
+
                 response = _bigquery.insertAll(
                         InsertAllRequest.newBuilder(tableId, batch)
                                 .build());
+
+                DynamicMetricsManager.getInstance().createOrUpdateHistogram(
+                        this.getClass().getSimpleName(),
+                        recordMetadata.get(0).getTopic(),
+                        "insertAllExecTime",
+                        start - System.currentTimeMillis());
             } catch (Exception e) {
                 LOG.warn("Failed to insert a rows {}", response);
                 exception = new DatastreamTransientException(e);

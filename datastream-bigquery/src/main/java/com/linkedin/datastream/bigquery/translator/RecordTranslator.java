@@ -138,21 +138,23 @@ public class RecordTranslator {
             }
 
         } else {
+            Map<String, Object> fieldVaules = new HashMap<>();
             if (record instanceof Boolean) {
-                result = new AbstractMap.SimpleEntry<>(Schema.Type.BOOLEAN.name().toLowerCase() + "_value", record);
+                fieldVaules.put(Schema.Type.BOOLEAN.name().toLowerCase() + "_value", record);
             } else if (record instanceof Integer) {
-                result = new AbstractMap.SimpleEntry<>(Schema.Type.INT.name().toLowerCase() + "_value", record);
+                fieldVaules.put(Schema.Type.INT.name().toLowerCase() + "_value", record);
             } else if (record instanceof Long) {
-                result = new AbstractMap.SimpleEntry<>(Schema.Type.LONG.name().toLowerCase() + "_value", record);
+                fieldVaules.put(Schema.Type.LONG.name().toLowerCase() + "_value", record);
             } else if (record instanceof Float) {
-                result = new AbstractMap.SimpleEntry<>(Schema.Type.FLOAT.name().toLowerCase() + "_value", record);
+                fieldVaules.put(Schema.Type.FLOAT.name().toLowerCase() + "_value", record);
             } else if (record instanceof Double) {
-                result = new AbstractMap.SimpleEntry<>(Schema.Type.DOUBLE.name().toLowerCase() + "_value", record);
+                fieldVaules.put(Schema.Type.DOUBLE.name().toLowerCase() + "_value", record);
             } else if (record instanceof ByteBuffer) {
-                result = new AbstractMap.SimpleEntry<>(Schema.Type.BYTES.name().toLowerCase() + "_value", record);
+                fieldVaules.put(Schema.Type.BYTES.name().toLowerCase() + "_value", record);
             } else if (record instanceof String || record instanceof Utf8) {
-                result = new AbstractMap.SimpleEntry<>(Schema.Type.STRING.name().toLowerCase() + "_value", String.valueOf(record));
+                fieldVaules.put(Schema.Type.STRING.name().toLowerCase() + "_value", String.valueOf(record));
             }
+            result = new AbstractMap.SimpleEntry<>(name, fieldVaules);
         }
         return result;
     }

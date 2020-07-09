@@ -16,6 +16,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.avro.LogicalType;
 import org.apache.avro.LogicalTypes;
 import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericArray;
@@ -109,7 +110,6 @@ public class RecordTranslator {
     private static Map.Entry<String, Object> translateUnionTypeObject(Object record, Schema avroSchema, String name) {
 
         Map.Entry<String, Object> result = new AbstractMap.SimpleEntry<>(name, null);
-        org.apache.avro.LogicalType logicalType = avroSchema.getLogicalType();
 
         if (record == null) {
             return result;
@@ -143,30 +143,124 @@ public class RecordTranslator {
             if (record instanceof Boolean) {
                 fieldVaules.put(Schema.Type.BOOLEAN.name().toLowerCase() + "_value", record);
             } else if (record instanceof Integer) {
+                LogicalType logicalType = null;
+                Schema subTypeSchema = null;
+                for (Schema schema: avroSchema.getTypes()) {
+                    if (schema.getType() == Schema.Type.INT) {
+                        subTypeSchema = schema;
+                        logicalType = schema.getLogicalType();
+                        break;
+                    }
+                }
+
                 if (logicalType != null) {
-                    fieldVaules.put(Schema.Type.INT.name().toLowerCase() + "_" + logicalType.getName().replace("-", "_") + "_value", record);
+                    if (LogicalTypeIdentifier.isDateType(subTypeSchema)) {
+                        fieldVaules.put(Schema.Type.INT.name().toLowerCase() + "_date_value", LogicalTypeTranslator.translateDateType((Long) record));
+                    } else if (LogicalTypeIdentifier.isMilliTime(subTypeSchema)) {
+                        fieldVaules.put(Schema.Type.INT.name().toLowerCase() + "_time_millis_value", LogicalTypeTranslator.translateTimeType((Long) record, subTypeSchema));
+                    }
                 } else {
                     fieldVaules.put(Schema.Type.INT.name().toLowerCase() + "_value", record);
                 }
             } else if (record instanceof Long) {
+                LogicalType logicalType = null;
+                Schema subTypeSchema = null;
+                for (Schema schema: avroSchema.getTypes()) {
+                    if (schema.getType() == Schema.Type.LONG) {
+                        subTypeSchema = schema;
+                        logicalType = schema.getLogicalType();
+                        break;
+                    }
+                }
+
                 if (logicalType != null) {
-                    fieldVaules.put(Schema.Type.LONG.name().toLowerCase() + "_" + logicalType.getName().replace("-", "_") + "_value", record);
+                    if (LogicalTypeIdentifier.isMicroTime(subTypeSchema)) {
+                        fieldVaules.put(Schema.Type.INT.name().toLowerCase() + "_time_micro_value", LogicalTypeTranslator.translateTimeType((Long) record, subTypeSchema));
+                    } else if (LogicalTypeIdentifier.isTimestampType(subTypeSchema)) {
+                        fieldVaules.put(Schema.Type.INT.name().toLowerCase() + "_" + logicalType.getName().replace("-", "_") + "_value", LogicalTypeTranslator.translateTimestampType((Long) record, subTypeSchema));
+                    }
                 } else {
-                    fieldVaules.put(Schema.Type.LONG.name().toLowerCase() + "_value", record);
+                    fieldVaules.put(Schema.Type.INT.name().toLowerCase() + "_value", record);
                 }
             } else if (record instanceof Float) {
                 fieldVaules.put(Schema.Type.FLOAT.name().toLowerCase() + "_value", record);
             } else if (record instanceof Double) {
                 fieldVaules.put(Schema.Type.DOUBLE.name().toLowerCase() + "_value", record);
             } else if (record instanceof ByteBuffer) {
-                if (logicalType != null) {
-                    fieldVaules.put(Schema.Type.BYTES.name().toLowerCase() + "_" + logicalType.getName().replace("-", "_") + "_value", record);
+                LogicalType logicalType = null;
+                for (Schema schema: avroSchema.getTypes()) {
+                    if (schema.getType() == Schema.Type.BYTES) {
+                        logicalType = schema.getLogicalType();
+                        break;
+                    }
+                }
+
+                if (logicalType instanceof LogicalTypes.Decimal) {
+                    if (LogicalTypeIdentifier.isDecimalType(avroSchema)) {
+                        fieldVaules.put(Schema.Type.BYTES.name().toLowerCase() + "_decimal_value", new BigDecimal(new BigInteger(((ByteBuffer) record).array()), ((LogicalTypes.Decimal) logicalType).getScale()));
+                    }
                 } else {
                     fieldVaules.put(Schema.Type.BYTES.name().toLowerCase() + "_value", record);
                 }
+            } else if (record instanceof GenericFixed) {
+                LogicalType logicalType = null;
+                Schema subTypeSchema = null;
+                for (Schema schema: avroSchema.getTypes()) {
+                    if (schema.getType() == Schema.Type.FIXED) {
+                        subTypeSchema = schema;
+                        logicalType = schema.getLogicalType();
+                        break;
+                    }
+                }
+
+                if (logicalType instanceof LogicalTypes.Decimal) {
+                    fieldVaules.put(subTypeSchema.getName() + "_decimal_value", new BigDecimal(new BigInteger(((ByteBuffer) record).array()), ((LogicalTypes.Decimal) logicalType).getScale()));
+                } else {
+                    fieldVaules.put(subTypeSchema.getName() + "_value", record);
+                }
             } else if (record instanceof String || record instanceof Utf8) {
+                // do not know how to handle enums
                 fieldVaules.put(Schema.Type.STRING.name().toLowerCase() + "_value", String.valueOf(record));
+            } else if (record instanceof GenericArray) {
+                LogicalType logicalType = null;
+                Schema subTypeSchema = null;
+                for (Schema schema: avroSchema.getTypes()) {
+                    if (schema.getType() == Schema.Type.ARRAY) {
+                        subTypeSchema = schema;
+                        logicalType = schema.getElementType().getLogicalType();
+                        break;
+                    }
+                }
+
+                Map.Entry<String, Object> subRec = translateArrayTypeObject(record, subTypeSchema, name);
+                if (logicalType != null) {
+                    fieldVaules.put("array_" + subTypeSchema.getElementType().getName() + "_" + logicalType.getName().replace("-", "_") + "_value", subRec.getValue());
+                } else {
+                    fieldVaules.put("array_" + subTypeSchema.getElementType().getName() + "_value", subRec.getValue());
+                }
+
+            } else if (record instanceof Map) {
+                LogicalType logicalType = null;
+                Schema subTypeSchema = null;
+                for (Schema schema: avroSchema.getTypes()) {
+                    if (schema.getType() == Schema.Type.MAP) {
+                        subTypeSchema = schema;
+                        logicalType = schema.getValueType().getLogicalType();
+                        break;
+                    }
+                }
+
+                Map.Entry<String, Object> subRec = translateMapTypeObject(record, subTypeSchema, name);
+                if (logicalType != null) {
+                    fieldVaules.put("map_" + subTypeSchema.getValueType().getName() + "_" + logicalType.getName().replace("-", "_") + "_value", subRec.getValue());
+                } else {
+                    fieldVaules.put("map_" + subTypeSchema.getValueType().getName() + "_value", subRec.getValue());
+                }
+
+            } else if (record instanceof GenericRecord) {
+                return null;
             }
+
             result = new AbstractMap.SimpleEntry<>(name, fieldVaules);
         }
         return result;
@@ -249,7 +343,7 @@ public class RecordTranslator {
             result = new AbstractMap.SimpleEntry<>(name, sRecords);
         } else if (avroSchema.getElementType().getType() == Schema.Type.MAP) {
             List<Map<String, Object>> sRecords = new ArrayList<>();
-            for (GenericRecord rec : (GenericArray<GenericRecord>) record) {
+            for (Object rec : (GenericArray<Object>) record) {
                 Map.Entry<String, Object> subMap = translateMapTypeObject(rec, avroSchema.getElementType(), name);
                 sRecords.addAll((List<Map<String, Object>>) subMap.getValue());
             }
@@ -262,7 +356,7 @@ public class RecordTranslator {
                 result = new AbstractMap.SimpleEntry<>(name, record);
             } else {
                 List<Map<String, Object>> sRecords = new ArrayList<>();
-                for (GenericRecord rec : (GenericArray<GenericRecord>) record) {
+                for (Object rec : (GenericArray<Object>) record) {
                     Map.Entry<String, Object> subMap = translateUnionTypeObject(rec, avroSchema.getElementType(), name);
                     sRecords.add((Map<String, Object>) subMap.getValue());
                 }
@@ -320,10 +414,7 @@ public class RecordTranslator {
         if (avroSchema.getType() != org.apache.avro.Schema.Type.RECORD) {
             throw new IllegalArgumentException("The root of the record's schema should be a RECORD type.");
         }
-        Map<String, Object> xyz = new HashMap<>();
-        xyz.put("a", new String("abc"));
-        //return InsertAllRequest.RowToInsert.of(translateRecord(avroRecord, avroSchema));
-        return InsertAllRequest.RowToInsert.of(xyz);
+        return InsertAllRequest.RowToInsert.of(translateRecord(avroRecord, avroSchema));
     }
 
 }

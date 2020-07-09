@@ -12,6 +12,7 @@ import com.google.cloud.bigquery.Field;
 import com.google.cloud.bigquery.FieldList;
 import com.google.cloud.bigquery.Schema;
 import com.google.cloud.bigquery.StandardSQLTypeName;
+import org.apache.avro.LogicalType;
 
 /**
  * This class translates given avro schema into BQ schema.
@@ -79,7 +80,12 @@ public class SchemaTranslator {
                         return null;
                     }
                     type = fieldTypePair.type;
-                    fieldBuilder = Field.newBuilder(name, type);
+
+                    if (type == StandardSQLTypeName.STRUCT) {
+                        fieldBuilder = Field.newBuilder(name, type, fieldTypePair.field.getSubFields());
+                    } else {
+                        fieldBuilder = Field.newBuilder(name, type);
+                    }
                 }
                 mode = Field.Mode.REPEATED;
                 break;
@@ -95,10 +101,18 @@ public class SchemaTranslator {
                     if (subFieldType == null) {
                         return null;
                     }
-                    fieldList = FieldList.of(
-                            Field.newBuilder("key", StandardSQLTypeName.STRING).build(),
-                            Field.newBuilder("value", subFieldType.type).build()
-                    );
+
+                    if (subFieldType.type == StandardSQLTypeName.STRUCT) {
+                        fieldList = FieldList.of(
+                                Field.newBuilder("key", StandardSQLTypeName.STRING).build(),
+                                Field.newBuilder("value", subFieldType.type, subFieldType.field.getSubFields()).build()
+                        );
+                    } else {
+                        fieldList = FieldList.of(
+                                Field.newBuilder("key", StandardSQLTypeName.STRING).build(),
+                                Field.newBuilder("value", subFieldType.type).build()
+                        );
+                    }
                 }
                 fieldBuilder = Field.newBuilder(name, type, FieldList.of(fieldList));
                 mode = Field.Mode.REPEATED;
@@ -118,22 +132,77 @@ public class SchemaTranslator {
                                 translateRecordSchema(childSchema));
                     } else {
                         fieldTypePair = translateNonRecordSchema(childSchema, name);
+                        if (fieldTypePair == null) {
+                            return null;
+                        }
+
                         type = fieldTypePair.type;
-                        fieldBuilder = Field.newBuilder(name, fieldTypePair.type);
+                        if (type == StandardSQLTypeName.STRUCT) {
+                            fieldBuilder = Field.newBuilder(name, fieldTypePair.type, fieldTypePair.field.getSubFields());
+                        } else {
+                            fieldBuilder = Field.newBuilder(name, fieldTypePair.type);
+                        }
                     }
 
                     mode = Field.Mode.NULLABLE;
 
                 } else {
                     for (org.apache.avro.Schema uType : avroSchema.getTypes()) {
-                        subFieldType = translateNonRecordSchema(uType, name);
-                        if (subFieldType == null) {
-                            mode = Field.Mode.NULLABLE;
-                            continue;
+                        if (uType.getType() == org.apache.avro.Schema.Type.RECORD) {
+                            Field.Builder fb = Field.newBuilder(uType.getName() + "_value",
+                                    StandardSQLTypeName.STRUCT, translateRecordSchema(uType));
+                            fb.setMode(Field.Mode.NULLABLE);
+                            fieldList.add(fb.build());
+                        } else if (uType.getType() == org.apache.avro.Schema.Type.ENUM) {
+                            Field.Builder fb = Field.newBuilder(uType.getName() + "_value", StandardSQLTypeName.STRING);
+                            fb.setMode(Field.Mode.NULLABLE);
+                            fieldList.add(fb.build());
+                        } else if (uType.getType() == org.apache.avro.Schema.Type.FIXED) {
+                            if (LogicalTypeIdentifier.isDecimalType(uType)) {
+                                Field.Builder fb = Field.newBuilder(uType.getName() + "_" + uType.getLogicalType().getName() + "_value", StandardSQLTypeName.NUMERIC);
+                                fb.setMode(Field.Mode.NULLABLE);
+                                fieldList.add(fb.build());
+                            } else {
+                                Field.Builder fb = Field.newBuilder(uType.getName() + "_value", StandardSQLTypeName.BYTES);
+                                fb.setMode(Field.Mode.NULLABLE);
+                                fieldList.add(fb.build());
+                            }
+                        } else {
+                            subFieldType = translateNonRecordSchema(uType, name);
+                            if (subFieldType == null) {
+                                mode = Field.Mode.NULLABLE;
+                                continue;
+                            }
+
+                            Field.Builder fb;
+                            if (uType.getType() == org.apache.avro.Schema.Type.MAP) {
+                                LogicalType lType = uType.getValueType().getLogicalType();
+                                if (lType == null) {
+                                    fb = Field.newBuilder("map_" + uType.getValueType().getType().getName() + "_value", subFieldType.type, subFieldType.field.getSubFields());
+                                } else {
+                                    fb = Field.newBuilder("map_" + uType.getValueType().getType().getName() + "_" + lType.getName().replace("-", "_") + "_value", subFieldType.type, subFieldType.field.getSubFields());
+                                }
+                            } else if(uType.getType() == org.apache.avro.Schema.Type.ARRAY) {
+                                if (subFieldType.type == StandardSQLTypeName.STRUCT) {
+                                    fb = Field.newBuilder("array_" + uType.getElementType().getType().getName() + "_value", subFieldType.type, subFieldType.field.getSubFields());
+                                } else {
+                                    LogicalType lType = uType.getElementType().getLogicalType();
+                                    if (lType == null) {
+                                        fb = Field.newBuilder("array_" + uType.getElementType().getType().getName() + "_value", subFieldType.type);
+                                    } else {
+                                        fb = Field.newBuilder("array_" + uType.getElementType().getType().getName() + "_" + lType.getName().replace("-", "_") + "_value", subFieldType.type);
+                                    }
+                                }
+                            } else {
+                                if (uType.getLogicalType() == null) {
+                                    fb = Field.newBuilder(uType.getType().name().toLowerCase() + "_value", subFieldType.type);
+                                } else {
+                                    fb = Field.newBuilder(uType.getType().name().toLowerCase() + "_" + uType.getLogicalType().getName().replace("-", "_") + "_value", subFieldType.type, subFieldType.field.getSubFields());
+                                }
+                            }
+                            fb.setMode(Field.Mode.NULLABLE);
+                            fieldList.add(fb.build());
                         }
-                        Field.Builder fb = Field.newBuilder(uType.getType().name().toLowerCase() + "_value", subFieldType.type);
-                        fb.setMode(Field.Mode.NULLABLE);
-                        fieldList.add(fb.build());
                     }
                     type = StandardSQLTypeName.STRUCT;
                     fieldBuilder = Field.newBuilder(name, type, FieldList.of(fieldList));

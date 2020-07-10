@@ -149,6 +149,8 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
                 LOG.debug("Committing a batch to dataset {} and table {}", datasetTable[0], sanitizeTableName(datasetTable[1]));
                 long start = System.currentTimeMillis();
 
+                LOG.info("...............batch is {}...............", batch);
+
                 response = _bigquery.insertAll(
                         InsertAllRequest.newBuilder(tableId, batch)
                                 .build());

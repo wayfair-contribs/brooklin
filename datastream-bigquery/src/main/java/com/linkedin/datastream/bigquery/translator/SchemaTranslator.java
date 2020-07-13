@@ -230,7 +230,6 @@ public class SchemaTranslator {
                             fieldList.add(fb.build());
                         }
                     }
-                    mode = Field.Mode.NULLABLE; // TODO: remove this line
                     type = StandardSQLTypeName.STRUCT;
                     fieldBuilder = Field.newBuilder(name, type, FieldList.of(fieldList));
                 }

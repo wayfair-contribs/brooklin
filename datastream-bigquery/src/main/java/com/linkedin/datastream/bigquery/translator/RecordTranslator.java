@@ -199,7 +199,7 @@ public class RecordTranslator {
             LogicalTypes.Decimal decimalType = (LogicalTypes.Decimal) avroSchema.getLogicalType();
             return new AbstractMap.SimpleEntry<>(name, new BigDecimal(new BigInteger(((GenericFixed) record).bytes()), decimalType.getScale()));
         } else {
-            return new AbstractMap.SimpleEntry<>(name, ((GenericFixed) record).bytes());
+            return new AbstractMap.SimpleEntry<>(name, Base64.getEncoder().encodeToString(((GenericFixed) record).bytes()));
         }
     }
 
@@ -249,7 +249,7 @@ public class RecordTranslator {
             } else if (record instanceof GenericArray) {
                 Schema subTypeSchema = findUnionSubSchema(avroSchema, record);
                 if (subTypeSchema != null) {
-                    LogicalType logicalType = subTypeSchema.getLogicalType();
+                    LogicalType logicalType = subTypeSchema.getElementType().getLogicalType();
 
                     String suffix = "_" + subTypeSchema.getElementType().getName() +
                             ((logicalType == null) ? "_value" : "_" + sanitizeName(logicalType.getName()) + "_value");
@@ -260,7 +260,7 @@ public class RecordTranslator {
             } else if (record instanceof Map) {
                 Schema subTypeSchema = findUnionSubSchema(avroSchema, record);
                 if (subTypeSchema != null) {
-                    LogicalType logicalType = subTypeSchema.getLogicalType();
+                    LogicalType logicalType = subTypeSchema.getValueType().getLogicalType();
 
                     String suffix = "_" + subTypeSchema.getValueType().getName() +
                             ((logicalType == null) ? "_value" : "_" + sanitizeName(logicalType.getName()) + "_value");
@@ -293,6 +293,15 @@ public class RecordTranslator {
                 TableRow subRecord = new TableRow();
                 subRecord.put("key", String.valueOf(entry.getKey()));
                 subRecord.put("value", translatePrimitiveTypeObject(entry.getValue(), avroSchema.getValueType()));
+                subRecords.add(subRecord);
+            }
+            result = new AbstractMap.SimpleEntry<>(name, subRecords);
+        } else if (avroSchema.getValueType().getType() == Schema.Type.ARRAY) {
+            Map<String, Object> map = (Map<String, Object>) record;
+            for (Map.Entry<String, Object> entry : map.entrySet()) {
+                TableRow subRecord = new TableRow();
+                subRecord.put("key", String.valueOf(entry.getKey()));
+                subRecord.put("value", translateArrayTypeObject(entry.getValue(), avroSchema.getValueType()));
                 subRecords.add(subRecord);
             }
             result = new AbstractMap.SimpleEntry<>(name, subRecords);
@@ -351,6 +360,7 @@ public class RecordTranslator {
         if (avroSchema.getElementType().getType() == Schema.Type.ARRAY) {
             throw new IllegalArgumentException("Array of array types are not supported.");
         }
+
         if (avroSchema.getElementType().getType() == Schema.Type.RECORD) {
             List<TableRow> sRecords = new ArrayList<>();
             for (GenericRecord rec : (GenericArray<GenericRecord>) record) {

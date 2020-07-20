@@ -8,11 +8,12 @@ package com.linkedin.datastream.bigquery.translator;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.apache.avro.LogicalType;
+
 import com.google.cloud.bigquery.Field;
 import com.google.cloud.bigquery.FieldList;
 import com.google.cloud.bigquery.Schema;
 import com.google.cloud.bigquery.StandardSQLTypeName;
-import org.apache.avro.LogicalType;
 
 /**
  * This class translates given avro schema into BQ schema.
@@ -94,7 +95,8 @@ public class SchemaTranslator {
                 if (avroSchema.getValueType().getType() == org.apache.avro.Schema.Type.RECORD) {
                     fieldList = FieldList.of(
                             Field.newBuilder("key", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build(),
-                            Field.newBuilder("value", StandardSQLTypeName.STRUCT, translateRecordSchema(avroSchema.getValueType())).setMode(Field.Mode.REQUIRED).build()
+                            Field.newBuilder("value", StandardSQLTypeName.STRUCT,
+                                    translateRecordSchema(avroSchema.getValueType())).setMode(Field.Mode.REQUIRED).build()
                     );
                 } else {
                     subFieldType = translateNonRecordSchema(avroSchema.getValueType(), name);
@@ -172,27 +174,30 @@ public class SchemaTranslator {
                         }
 
                         if (uType.getType() == org.apache.avro.Schema.Type.RECORD) {
-                            Field.Builder fb = Field.newBuilder(uType.getName() + "_value",
+                            Field.Builder fb = Field.newBuilder(uType.getName().toLowerCase() + "_value",
                                     StandardSQLTypeName.STRUCT, translateRecordSchema(uType));
                             fb.setMode(Field.Mode.NULLABLE);
                             fieldList.add(fb.build());
                         } else if (uType.getType() == org.apache.avro.Schema.Type.ENUM) {
-                            Field.Builder fb = Field.newBuilder(uType.getName() + "_value", StandardSQLTypeName.STRING);
+                            Field.Builder fb = Field.newBuilder(uType.getName().toLowerCase() + "_value", StandardSQLTypeName.STRING);
                             fb.setMode(Field.Mode.NULLABLE);
                             fieldList.add(fb.build());
                         } else if (uType.getType() == org.apache.avro.Schema.Type.FIXED) {
                             if (LogicalTypeIdentifier.isDecimalType(uType)) {
-                                Field.Builder fb = Field.newBuilder(uType.getName() + "_" + uType.getLogicalType().getName() + "_value", StandardSQLTypeName.NUMERIC);
+                                Field.Builder fb = Field.newBuilder(uType.getName().toLowerCase()
+                                                + "_"
+                                                + uType.getLogicalType().getName().toLowerCase()
+                                                + "_value",
+                                        StandardSQLTypeName.NUMERIC);
                                 fb.setMode(Field.Mode.NULLABLE);
                                 fieldList.add(fb.build());
                             } else {
-                                Field.Builder fb = Field.newBuilder(uType.getName() + "_value", StandardSQLTypeName.BYTES);
+                                Field.Builder fb = Field.newBuilder(uType.getName().toLowerCase() + "_value", StandardSQLTypeName.BYTES);
                                 fb.setMode(Field.Mode.NULLABLE);
                                 fieldList.add(fb.build());
                             }
                         } else {
                             subFieldType = translateNonRecordSchema(uType, name);
-                            mode = Field.Mode.NULLABLE;
                             if (subFieldType == null) {
                                 continue;
                             }
@@ -201,28 +206,49 @@ public class SchemaTranslator {
                             if (uType.getType() == org.apache.avro.Schema.Type.MAP) {
                                 LogicalType lType = uType.getValueType().getLogicalType();
                                 if (lType == null) {
-                                    fb = Field.newBuilder("map_" + uType.getValueType().getType().getName() + "_value", subFieldType.type, subFieldType.field.getSubFields());
+                                    fb = Field.newBuilder("map_" + uType.getValueType().getType().getName().toLowerCase() + "_value",
+                                            subFieldType.type,
+                                            subFieldType.field.getSubFields());
                                 } else {
-                                    fb = Field.newBuilder("map_" + uType.getValueType().getType().getName() + "_" + lType.getName().replace("-", "_") + "_value", subFieldType.type, subFieldType.field.getSubFields());
+                                    fb = Field.newBuilder("map_" +
+                                                    uType.getValueType().getType().getName().toLowerCase() +
+                                                    "_" +
+                                                    lType.getName().toLowerCase().replace("-", "_") +
+                                                    "_value",
+                                            subFieldType.type,
+                                            subFieldType.field.getSubFields());
                                 }
                                 fb.setMode(Field.Mode.REPEATED);
-                            } else if(uType.getType() == org.apache.avro.Schema.Type.ARRAY) {
+                            } else if (uType.getType() == org.apache.avro.Schema.Type.ARRAY) {
                                 if (subFieldType.type == StandardSQLTypeName.STRUCT) {
-                                    fb = Field.newBuilder("array_" + uType.getElementType().getType().getName() + "_value", subFieldType.type, subFieldType.field.getSubFields());
+                                    fb = Field.newBuilder("array_" + uType.getElementType().getType().getName().toLowerCase() + "_value",
+                                            subFieldType.type,
+                                            subFieldType.field.getSubFields());
                                 } else {
                                     LogicalType lType = uType.getElementType().getLogicalType();
                                     if (lType == null) {
-                                        fb = Field.newBuilder("array_" + uType.getElementType().getType().getName() + "_value", subFieldType.type);
+                                        fb = Field.newBuilder("array_" + uType.getElementType().getType().getName().toLowerCase() + "_value",
+                                                subFieldType.type);
                                     } else {
-                                        fb = Field.newBuilder("array_" + uType.getElementType().getType().getName() + "_" + lType.getName().replace("-", "_") + "_value", subFieldType.type);
+                                        fb = Field.newBuilder("array_" +
+                                                        uType.getElementType().getType().getName().toLowerCase() +
+                                                        "_" +
+                                                        lType.getName().toLowerCase().replace("-", "_") +
+                                                        "_value",
+                                                subFieldType.type);
                                     }
                                 }
                                 fb.setMode(Field.Mode.REPEATED);
                             } else {
-                                if (uType.getLogicalType() == null) {
-                                    fb = Field.newBuilder(uType.getType().name() + "_value", subFieldType.type);
+                                if (uType.getLogicalType() == null || uType.getLogicalType().getName().equals("uuid")) {
+                                    fb = Field.newBuilder(uType.getType().getName().toLowerCase() + "_value", subFieldType.type);
                                 } else {
-                                    fb = Field.newBuilder(uType.getType().name() + "_" + uType.getLogicalType().getName().replace("-", "_") + "_value", subFieldType.type, subFieldType.field.getSubFields());
+                                    fb = Field.newBuilder(uType.getType().getName().toLowerCase() +
+                                                    "_" +
+                                                    uType.getLogicalType().getName().toLowerCase().replace("-", "_") +
+                                                    "_value",
+                                            subFieldType.type,
+                                            subFieldType.field.getSubFields());
                                 }
                                 fb.setMode(Field.Mode.NULLABLE);
                             }
@@ -312,4 +338,3 @@ public class SchemaTranslator {
         return Schema.of(translateRecordSchema(avroSchema));
     }
 }
-

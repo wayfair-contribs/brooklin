@@ -16,7 +16,6 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 
-import com.google.api.services.bigquery.model.TableRow;
 import org.apache.avro.LogicalType;
 import org.apache.avro.LogicalTypes;
 import org.apache.avro.Schema;
@@ -27,6 +26,7 @@ import org.apache.avro.generic.GenericFixed;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.avro.util.Utf8;
 
+import com.google.api.services.bigquery.model.TableRow;
 import com.google.cloud.bigquery.InsertAllRequest;
 
 /**
@@ -107,7 +107,7 @@ public class RecordTranslator {
     }
 
     private static String sanitizeName(String name) {
-        return name.replace("-", "_");
+        return name.toLowerCase().replace("-", "_");
     }
 
     private static Object translatePrimitiveTypeObject(Object record, Schema avroSchema) {
@@ -236,13 +236,13 @@ public class RecordTranslator {
                 Schema subTypeSchema = findUnionSubSchema(avroSchema, record);
                 if (subTypeSchema != null) {
                     LogicalType logicalType = subTypeSchema.getLogicalType();
-                    String suffix = (logicalType == null) ? "_value" :
+                    String suffix = (logicalType == null || logicalType.getName().equals("uuid")) ? "_value" :
                             "_" + sanitizeName(logicalType.getName()) + "_value";
                     if (isPrimitiveTypeByRecord(record)) {
-                        fieldVaules.put(subTypeSchema.getType().getName() + suffix,
+                        fieldVaules.put(subTypeSchema.getType().getName().toLowerCase() + suffix,
                                 translatePrimitiveTypeObject(record, subTypeSchema));
                     } else {
-                        fieldVaules.put(subTypeSchema.getType().getName() + suffix,
+                        fieldVaules.put(subTypeSchema.getType().getName().toLowerCase() + suffix,
                                 translateFixedTypeObject(record, subTypeSchema));
                     }
                 }
@@ -251,10 +251,10 @@ public class RecordTranslator {
                 if (subTypeSchema != null) {
                     LogicalType logicalType = subTypeSchema.getElementType().getLogicalType();
 
-                    String suffix = "_" + subTypeSchema.getElementType().getName() +
+                    String suffix = "_" + subTypeSchema.getElementType().getName().toLowerCase() +
                             ((logicalType == null) ? "_value" : "_" + sanitizeName(logicalType.getName()) + "_value");
 
-                    fieldVaules.put(subTypeSchema.getType().getName() + suffix,
+                    fieldVaules.put(subTypeSchema.getType().getName().toLowerCase() + suffix,
                             translateArrayTypeObject(record, subTypeSchema));
                 }
             } else if (record instanceof Map) {
@@ -262,18 +262,18 @@ public class RecordTranslator {
                 if (subTypeSchema != null) {
                     LogicalType logicalType = subTypeSchema.getValueType().getLogicalType();
 
-                    String suffix = "_" + subTypeSchema.getValueType().getName() +
+                    String suffix = "_" + subTypeSchema.getValueType().getName().toLowerCase() +
                             ((logicalType == null) ? "_value" : "_" + sanitizeName(logicalType.getName()) + "_value");
 
-                    fieldVaules.put(subTypeSchema.getType().getName() + suffix,
+                    fieldVaules.put(subTypeSchema.getType().getName().toLowerCase() + suffix,
                             translateMapTypeObject(record, subTypeSchema));
                 }
             } else if (record instanceof GenericRecord) {
                 GenericData.Record rec = (GenericData.Record) record;
-                fieldVaules.put(rec.getSchema().getName() + "_value", translateRecord(rec));
+                fieldVaules.put(rec.getSchema().getName().toLowerCase() + "_value", translateRecord(rec));
             } else if (record instanceof GenericData.EnumSymbol) {
                 GenericData.EnumSymbol rec = (GenericData.EnumSymbol) record;
-                fieldVaules.put(rec.getSchema().getName() + "_value", translateEnumTypeObject(record));
+                fieldVaules.put(rec.getSchema().getName().toLowerCase() + "_value", translateEnumTypeObject(record));
             }
 
             result = new AbstractMap.SimpleEntry<>(name, fieldVaules);
@@ -450,5 +450,3 @@ public class RecordTranslator {
     }
 
 }
-
-

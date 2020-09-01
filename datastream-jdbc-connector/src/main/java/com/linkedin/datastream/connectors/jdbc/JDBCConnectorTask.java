@@ -25,13 +25,13 @@ import javax.sql.DataSource;
 import org.apache.avro.file.DataFileStream;
 import org.apache.avro.generic.GenericDatumReader;
 import org.apache.avro.generic.GenericRecord;
-import org.apache.nifi.util.db.JdbcCommon;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.linkedin.datastream.common.BrooklinEnvelope;
 import com.linkedin.datastream.common.BrooklinEnvelopeMetadataConstants;
 import com.linkedin.datastream.common.DatastreamRecordMetadata;
+import com.linkedin.datastream.connectors.jdbc.translator.JdbcCommon;
 import com.linkedin.datastream.server.DatastreamEventProducer;
 import com.linkedin.datastream.server.DatastreamProducerRecordBuilder;
 import com.linkedin.datastream.server.FlushlessEventProducerHandler;
@@ -162,7 +162,7 @@ public class JDBCConnectorTask {
                 preparedStatement.setLong(1, checkpoint);
 
                 try (ResultSet rs = preparedStatement.executeQuery()) {
-                    processResults(rs);
+                    this.processResults(rs);
                 }
             }
         } catch (SQLException | IOException e) {

@@ -10,6 +10,14 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.linkedin.datastream.common.*;
+import com.linkedin.datastream.common.Package;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileStatus;
+import org.apache.hadoop.fs.Path;
+import org.apache.parquet.format.converter.ParquetMetadataConverter;
+import org.apache.parquet.hadoop.ParquetFileReader;
+import org.apache.parquet.hadoop.metadata.ParquetMetadata;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -17,12 +25,6 @@ import com.codahale.metrics.Meter;
 
 import com.linkedin.datastream.cloud.storage.committer.ObjectCommitter;
 import com.linkedin.datastream.cloud.storage.io.File;
-
-import com.linkedin.datastream.common.DatastreamRecordMetadata;
-import com.linkedin.datastream.common.Package;
-import com.linkedin.datastream.common.ReflectionUtils;
-import com.linkedin.datastream.common.SendCallback;
-import com.linkedin.datastream.common.VerifiableProperties;
 
 import com.linkedin.datastream.metrics.DynamicMetricsManager;
 
@@ -42,6 +44,8 @@ public class WriteLog {
 
     private final Meter _writeRateMeter;
 
+    private Exception exception = null;
+
     private File _file;
     private String _destination;
     private String _topic;
@@ -53,6 +57,9 @@ public class WriteLog {
 
     private int _inflightWriteLogCommits;
     private Object _counterLock;
+    private Configuration _conf = null;
+    private long _prevFailedOffset;
+
 
     private long _fileStartTime;
 
@@ -90,6 +97,8 @@ public class WriteLog {
         this._partition = 0;
         this._minOffset = Long.MAX_VALUE;
         this._maxOffset = Long.MIN_VALUE;
+        this._prevFailedOffset = Long.MAX_VALUE;
+        this._conf = new Configuration();
         this._counterLock = new Object();
         this._writeRateMeter = DynamicMetricsManager.getInstance().registerMetric(this.getClass().getSimpleName(),
                 "writeRate", Meter.class);
@@ -163,6 +172,21 @@ public class WriteLog {
         _recordMetadata.clear();
     }
 
+    private static void deleteFile(java.io.File file) {
+        LOG.info("Deleting file {}", file.toPath());
+        if (!file.delete()) {
+            LOG.warn("Failed to delete file {}.", file.toPath());
+        }
+
+        // clean crc files
+        final java.io.File crcFile = new java.io.File(file.getParent() + "/." + file.getName() + ".crc");
+        if (crcFile.exists() && crcFile.isFile()) {
+            if (!crcFile.delete()) {
+                LOG.warn("Failed to delete crc file {}.", crcFile.toPath());
+            }
+        }
+    }
+
     /**
      * writes the given record in the package to the write log
      * @param aPackage package to be written
@@ -170,22 +194,42 @@ public class WriteLog {
      */
     public void write(Package aPackage) throws IOException, InterruptedException {
         if (aPackage.isDataPackage()) {
-            final String filePath = getFilePath(aPackage.getTopic(), String.valueOf(aPackage.getPartition()));
-            if (_file == null) {
-                _file = ReflectionUtils.createInstance(_ioClass, filePath, _ioProperties);
-                _destination = aPackage.getDestination();
-                _topic = aPackage.getTopic();
-                _partition = aPackage.getPartition();
-                _fileStartTime = System.currentTimeMillis();
+            if (_prevFailedOffset == Long.MAX_VALUE) {
+                final String filePath = getFilePath(aPackage.getTopic(), String.valueOf(aPackage.getPartition()));
+                if (_file == null) {
+                    _file = ReflectionUtils.createInstance(_ioClass, filePath, _ioProperties);
+                    _destination = aPackage.getDestination();
+                    _topic = aPackage.getTopic();
+                    _partition = aPackage.getPartition();
+                    _fileStartTime = System.currentTimeMillis();
+                }
+                _writeRateMeter.mark();
+                _file.write(aPackage);
+                _maxOffset = (aPackage.getOffset() > _maxOffset) ? aPackage.getOffset() : _maxOffset;
+                _minOffset = (aPackage.getOffset() < _minOffset) ? aPackage.getOffset() : _minOffset;
+                _ackCallbacks.add(aPackage.getAckCallback());
+                _recordMetadata.add(new DatastreamRecordMetadata(aPackage.getCheckpoint(),
+                        aPackage.getTopic(),
+                        aPackage.getPartition()));
+            }else if (_prevFailedOffset != Long.MAX_VALUE && aPackage.getOffset() == _prevFailedOffset) {
+                final String filePath = getFilePath(aPackage.getTopic(), String.valueOf(aPackage.getPartition()));
+                if (_file == null) {
+                    _file = ReflectionUtils.createInstance(_ioClass, filePath, _ioProperties);
+                    _destination = aPackage.getDestination();
+                    _topic = aPackage.getTopic();
+                    _partition = aPackage.getPartition();
+                    _fileStartTime = System.currentTimeMillis();
+                }
+                _writeRateMeter.mark();
+                _file.write(aPackage);
+                _maxOffset = (aPackage.getOffset() > _maxOffset) ? aPackage.getOffset() : _maxOffset;
+                _minOffset = (aPackage.getOffset() < _minOffset) ? aPackage.getOffset() : _minOffset;
+                _ackCallbacks.add(aPackage.getAckCallback());
+                _recordMetadata.add(new DatastreamRecordMetadata(aPackage.getCheckpoint(),
+                        aPackage.getTopic(),
+                        aPackage.getPartition()));
             }
-            _writeRateMeter.mark();
-            _file.write(aPackage);
-            _maxOffset = (aPackage.getOffset() > _maxOffset) ? aPackage.getOffset() : _maxOffset;
-            _minOffset = (aPackage.getOffset() < _minOffset) ? aPackage.getOffset() : _minOffset;
-            _ackCallbacks.add(aPackage.getAckCallback());
-            _recordMetadata.add(new DatastreamRecordMetadata(aPackage.getCheckpoint(),
-                    aPackage.getTopic(),
-                    aPackage.getPartition()));
+
         } else if (aPackage.isTryFlushSignal() || aPackage.isForceFlushSignal()) {
             if (_file == null) {
                 LOG.debug("Nothing to flush.");
@@ -198,22 +242,39 @@ public class WriteLog {
             waitForRoomInCommitBacklog();
             incrementInflightWriteLogCommits();
             _file.close();
-            _committer.commit(
-                    _file.getPath(),
-                    _file.getFileFormat(),
-                    _destination,
-                    _topic,
-                    _partition,
-                    _minOffset,
-                    _maxOffset,
-                    new ArrayList<>(_ackCallbacks),
-                    new ArrayList<>(_recordMetadata),
-                    () -> decrementInflightWriteLogCommitsAndNotify()
+            try {
+                ParquetMetadata parquetMetadata = ParquetFileReader.readFooter(_conf, (Path) _file, ParquetMetadataConverter.SKIP_ROW_GROUPS);
+                if (parquetMetadata.getBlocks().isEmpty()) {
+                    _prevFailedOffset = _minOffset;
+                    exception = new DatastreamTransientException();
+                    for (int i = 0; i < _ackCallbacks.size(); i++) {
+                        _ackCallbacks.get(i).onCompletion(_recordMetadata.get(i), exception);
+                    }
+                    reset();
+                    deleteFile((java.io.File) _file);
+                } else {
+                    _committer.commit(
+                            _file.getPath(),
+                            _file.getFileFormat(),
+                            _destination,
+                            _topic,
+                            _partition,
+                            _minOffset,
+                            _maxOffset,
+                            new ArrayList<>(_ackCallbacks),
+                            new ArrayList<>(_recordMetadata),
+                            () -> decrementInflightWriteLogCommitsAndNotify()
                     );
-            reset();
+                    reset();
+                    if (aPackage.isForceFlushSignal()) {
+                        waitForCommitBacklogToClear();
+                    }
 
-            if (aPackage.isForceFlushSignal()) {
-                waitForCommitBacklogToClear();
+                }
+            } catch (RuntimeException e) {
+                LOG.error("Parquet file check for corruption Failed" + e);
+            } catch (IOException e) {
+                LOG.error("Parquet file check for corruption Failed" + e);
             }
         }
     }

@@ -163,9 +163,7 @@ public class GCSObjectCommitter implements ObjectCommitter {
                         .newBuilder(BlobId.of(getBucketName(destination), objectName))
                         .setContentType(Files.probeContentType(file.toPath()))
                         .build();
-
                 LOG.info("Committing Object {}", objectName);
-
                 if (file.getTotalSpace() <= _writeAtOnceMaxFileSize) {
                     Blob blob = _storage.create(sourceBlob, Files.readAllBytes(file.toPath()));
                 } else {

@@ -94,7 +94,6 @@ public class JDBCConnectorTask {
         ByteArrayOutputStream outputStream = new ByteArrayOutputStream(5 * 1024 * 1024);
         JdbcCommon.convertToAvroStream(resultSet, outputStream, true);
         GenericDatumReader<GenericRecord> reader = new GenericDatumReader<>(JdbcCommon.createSchema(resultSet));
-
         InputStream inputStream = new ByteArrayInputStream(outputStream.toByteArray());
         DataFileStream<GenericRecord> avroStream = new DataFileStream<>(inputStream, reader);
 

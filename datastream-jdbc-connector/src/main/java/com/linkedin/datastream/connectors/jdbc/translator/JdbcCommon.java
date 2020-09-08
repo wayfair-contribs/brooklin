@@ -87,6 +87,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import com.linkedin.datastream.connectors.jdbc.JDBCConnector;
+import microsoft.sql.DateTimeOffset;
 import org.apache.avro.LogicalTypes;
 import org.apache.avro.Schema;
 import org.apache.avro.SchemaBuilder;
@@ -153,7 +154,7 @@ public class JdbcCommon {
     }
 
     public static void createEmptyAvroStream(final OutputStream outStream) throws IOException {
-        final FieldAssembler<Schema> builder = SchemaBuilder.record("NiFi_ExecuteSQL_Record").namespace("any.data").fields();
+        final FieldAssembler<Schema> builder = SchemaBuilder.record("NiFi_ExecuteSQL_Record").namespace("com.wayfair.brooklin").fields();
         final Schema schema = builder.endRecord();
 
         final DatumWriter<GenericRecord> datumWriter = new GenericDatumWriter<>(schema);
@@ -318,12 +319,7 @@ public class JdbcCommon {
                     }
 
                     Object value;
-                    // If a Timestamp type, try getTimestamp() rather than getObject()
-                    if (javaSqlType == TIMESTAMP
-                            || javaSqlType == TIMESTAMP_WITH_TIMEZONE
-                            // The following are Oracle-specific codes for TIMESTAMP WITH TIME ZONE and TIMESTAMP WITH LOCAL TIME ZONE. This would be better
-                            // located in the DatabaseAdapter interfaces, but some processors (like ExecuteSQL) use this method but don't specify a DatabaseAdapter.
-                            || javaSqlType == -101
+                    if (javaSqlType == -101
                             || javaSqlType == -102) {
                         try {
                             value = rs.getTimestamp(i);
@@ -335,9 +331,14 @@ public class JdbcCommon {
                             // The cause of the exception is not known, but we'll fall back to call getObject() and handle any "real" exception there
                             value = rs.getObject(i);
                         }
-                    } else if (javaSqlType == microsoft.sql.Types.DATETIMEOFFSET) { // -155 represents TSQL Datetimeoffset type
+                    } else if (javaSqlType == TIMESTAMP // 93
+                            || javaSqlType == TIMESTAMP_WITH_TIMEZONE // 2014
+                            || javaSqlType == microsoft.sql.Types.SMALLDATETIME // -150 represents TSQL smalldatetime type
+                            || javaSqlType == microsoft.sql.Types.DATETIME // -151 represents TSQL datetime type
+                            || javaSqlType == microsoft.sql.Types.DATETIMEOFFSET) { // -155 represents TSQL Datetimeoffset type
+
                         try {
-                            // Convert datetimeoffset to UTC then convert to timestamp millis
+                            // Convert datetime, datetime2 and datetimeoffset to UTC then convert to timestamp millis
                             value = rs.getTimestamp(i).getTime();
                             // Some drivers (like Derby) return null for getTimestamp() but return a Timestamp object in getObject()
                             if (value == null) {
@@ -505,7 +506,7 @@ public class JdbcCommon {
             tableName = normalizeNameForAvro(tableName);
         }
 
-        final FieldAssembler<Schema> builder = SchemaBuilder.record(tableName).namespace("any.data").fields();
+        final FieldAssembler<Schema> builder = SchemaBuilder.record(tableName).namespace("wayfair.bde.brooklin").fields();
 
         /**
          * Some missing Avro types - Decimal, Date types. May need some additional work.
@@ -623,22 +624,21 @@ public class JdbcCommon {
                                     : u.stringType());
                     break;
 
-                case TIMESTAMP:
-                case TIMESTAMP_WITH_TIMEZONE:
-                case microsoft.sql.Types.DATETIMEOFFSET: // TSQL DATETIMEOFFSET
-//                    if (options.useLogicalTypes) {
-                        final Schema timestampMilliType = LogicalTypes.timestampMillis().addToSchema(SchemaBuilder.builder().longType());
-                        builder.name(columnName).type().unionOf().nullBuilder().endNull().and().type(timestampMilliType).endUnion().noDefault();
-//                    } else {
-//                        addNullableField(builder, columnName, u -> u.stringType());
-//                    }
-                    break;
                 case -101: // Oracle's TIMESTAMP WITH TIME ZONE
                 case -102: // Oracle's TIMESTAMP WITH LOCAL TIME ZONE
                     addNullableField(builder, columnName,
                             u -> options.useLogicalTypes
                                     ? u.type(LogicalTypes.timestampMillis().addToSchema(SchemaBuilder.builder().longType()))
                                     : u.stringType());
+                    break;
+
+                case TIMESTAMP:
+                case TIMESTAMP_WITH_TIMEZONE:
+                case microsoft.sql.Types.SMALLDATETIME: // -150 represents TSQL smalldatetime type
+                case microsoft.sql.Types.DATETIME: // -151 represents TSQL datetime type
+                case microsoft.sql.Types.DATETIMEOFFSET: // TSQL DATETIMEOFFSET
+                    final Schema timestampMilliType = LogicalTypes.timestampMillis().addToSchema(SchemaBuilder.builder().longType());
+                    builder.name(columnName).type().unionOf().nullBuilder().endNull().and().type(timestampMilliType).endUnion().nullDefault();
                     break;
 
                 case BINARY:

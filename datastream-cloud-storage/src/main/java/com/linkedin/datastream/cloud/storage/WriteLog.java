@@ -59,6 +59,7 @@ public class WriteLog {
     private Object _counterLock;
     private Configuration _conf = null;
     private long _prevFailedOffset;
+    private long _lastSeenOffset;
 
 
     private long _fileStartTime;
@@ -194,6 +195,28 @@ public class WriteLog {
      */
     public void write(Package aPackage) throws IOException, InterruptedException {
         if (aPackage.isDataPackage()) {
+
+            if (_prevFailedOffset != Long.MAX_VALUE) {
+                if (aPackage.getOffset() < _prevFailedOffset) {
+                    aPackage.getAckCallback().onCompletion(new DatastreamRecordMetadata(aPackage.getCheckpoint(),
+                                    aPackage.getTopic(),
+                                    aPackage.getPartition())
+                            , null);
+                    return;
+                } else if (aPackage.getOffset() == _lastSeenOffset + 1) {
+                    aPackage.getAckCallback().onCompletion(new DatastreamRecordMetadata(aPackage.getCheckpoint(),
+                                    aPackage.getTopic(),
+                                    aPackage.getPartition())
+                            , new DatastreamTransientException()); // TODO: add message
+                    _lastSeenOffset = aPackage.getOffset();
+                    return;
+                } else if (aPackage.getOffset() == _prevFailedOffset + 1) {
+                    _prevFailedOffset = Long.MAX_VALUE;
+                } else if (aPackage.getOffset() > _lastSeenOffset) {
+                    _prevFailedOffset = Long.MAX_VALUE;
+                }
+            }
+
             if (_prevFailedOffset == Long.MAX_VALUE) {
                 final String filePath = getFilePath(aPackage.getTopic(), String.valueOf(aPackage.getPartition()));
                 if (_file == null) {
@@ -211,31 +234,15 @@ public class WriteLog {
                 _recordMetadata.add(new DatastreamRecordMetadata(aPackage.getCheckpoint(),
                         aPackage.getTopic(),
                         aPackage.getPartition()));
-            }else if (_prevFailedOffset != Long.MAX_VALUE && aPackage.getOffset() == _prevFailedOffset) {
-                final String filePath = getFilePath(aPackage.getTopic(), String.valueOf(aPackage.getPartition()));
-                if (_file == null) {
-                    _file = ReflectionUtils.createInstance(_ioClass, filePath, _ioProperties);
-                    _destination = aPackage.getDestination();
-                    _topic = aPackage.getTopic();
-                    _partition = aPackage.getPartition();
-                    _fileStartTime = System.currentTimeMillis();
-                }
-                _writeRateMeter.mark();
-                _file.write(aPackage);
-                _maxOffset = (aPackage.getOffset() > _maxOffset) ? aPackage.getOffset() : _maxOffset;
-                _minOffset = (aPackage.getOffset() < _minOffset) ? aPackage.getOffset() : _minOffset;
-                _ackCallbacks.add(aPackage.getAckCallback());
-                _recordMetadata.add(new DatastreamRecordMetadata(aPackage.getCheckpoint(),
-                        aPackage.getTopic(),
-                        aPackage.getPartition()));
             }
-
+            _lastSeenOffset = aPackage.getOffset();
         } else if (aPackage.isTryFlushSignal() || aPackage.isForceFlushSignal()) {
             if (_file == null) {
                 LOG.debug("Nothing to flush.");
                 return;
             }
         }
+
         if (_file.length() >= _maxFileSize ||
                 System.currentTimeMillis() - _fileStartTime >= _maxFileAge ||
                 aPackage.isForceFlushSignal()) {
@@ -246,12 +253,12 @@ public class WriteLog {
                 ParquetMetadata parquetMetadata = ParquetFileReader.readFooter(_conf, (Path) _file, ParquetMetadataConverter.SKIP_ROW_GROUPS);
                 if (parquetMetadata.getBlocks().isEmpty()) {
                     _prevFailedOffset = _minOffset;
-                    exception = new DatastreamTransientException();
+                    exception = new DatastreamTransientException(); // TODO: add message
                     for (int i = 0; i < _ackCallbacks.size(); i++) {
                         _ackCallbacks.get(i).onCompletion(_recordMetadata.get(i), exception);
                     }
                     reset();
-                    deleteFile((java.io.File) _file);
+                    deleteFile(new java.io.File(_file.getPath()));
                 } else {
                     _committer.commit(
                             _file.getPath(),

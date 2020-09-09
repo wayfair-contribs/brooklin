@@ -10,14 +10,19 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
-import com.linkedin.datastream.common.*;
+import com.linkedin.datastream.common.DatastreamTransientException;
+import com.linkedin.datastream.common.DatastreamRecordMetadata;
 import com.linkedin.datastream.common.Package;
+import com.linkedin.datastream.common.ReflectionUtils;
+import com.linkedin.datastream.common.SendCallback;
+import com.linkedin.datastream.common.VerifiableProperties;
+
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.Path;
 import org.apache.parquet.format.converter.ParquetMetadataConverter;
 import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.metadata.ParquetMetadata;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -202,22 +207,27 @@ public class WriteLog {
                                     aPackage.getTopic(),
                                     aPackage.getPartition())
                             , null);
+                    LOG.info("Packet with already processed offset arrived");
                     return;
                 } else if (aPackage.getOffset() == _lastSeenOffset + 1) {
                     aPackage.getAckCallback().onCompletion(new DatastreamRecordMetadata(aPackage.getCheckpoint(),
                                     aPackage.getTopic(),
                                     aPackage.getPartition())
-                            , new DatastreamTransientException()); // TODO: add message
+                            , new DatastreamTransientException("High offset record")); // TODO: add message
                     _lastSeenOffset = aPackage.getOffset();
+                    LOG.info("Packet with future offset can't be processed");
                     return;
                 } else if (aPackage.getOffset() == _prevFailedOffset + 1) {
                     _prevFailedOffset = Long.MAX_VALUE;
+                    LOG.info("Packet with desired offset found");
                 } else if (aPackage.getOffset() > _lastSeenOffset) {
                     _prevFailedOffset = Long.MAX_VALUE;
+                    LOG.info("Packet drop");
                 }
             }
 
             if (_prevFailedOffset == Long.MAX_VALUE) {
+                LOG.info("Start processing and persisting records in local file");
                 final String filePath = getFilePath(aPackage.getTopic(), String.valueOf(aPackage.getPartition()));
                 if (_file == null) {
                     _file = ReflectionUtils.createInstance(_ioClass, filePath, _ioProperties);
@@ -249,14 +259,26 @@ public class WriteLog {
             waitForRoomInCommitBacklog();
             incrementInflightWriteLogCommits();
             _file.close();
+            LOG.info("File ready to be consumed by committer");
             try {
                 ParquetMetadata parquetMetadata = ParquetFileReader.readFooter(_conf, (Path) _file, ParquetMetadataConverter.SKIP_ROW_GROUPS);
                 if (parquetMetadata.getBlocks().isEmpty()) {
+                    LOG.info("Corrupt file identified");
                     _prevFailedOffset = _minOffset;
-                    exception = new DatastreamTransientException(); // TODO: add message
+                    exception = new DatastreamTransientException("Drop corrupt record"); // TODO: add message
                     for (int i = 0; i < _ackCallbacks.size(); i++) {
                         _ackCallbacks.get(i).onCompletion(_recordMetadata.get(i), exception);
                     }
+                    DynamicMetricsManager.getInstance().createOrUpdateMeter(
+                            this.getClass().getSimpleName(),
+                            _recordMetadata.get(0).getTopic(),
+                            "errorCount",
+                            1);
+                    DynamicMetricsManager.getInstance().createOrUpdateMeter(
+                            this.getClass().getSimpleName(),
+                            _recordMetadata.get(0).getTopic(),
+                            "commitCount",
+                            1);
                     reset();
                     deleteFile(new java.io.File(_file.getPath()));
                 } else {
@@ -272,6 +294,7 @@ public class WriteLog {
                             new ArrayList<>(_recordMetadata),
                             () -> decrementInflightWriteLogCommitsAndNotify()
                     );
+                    LOG.info("File committed");
                     reset();
                     if (aPackage.isForceFlushSignal()) {
                         waitForCommitBacklogToClear();

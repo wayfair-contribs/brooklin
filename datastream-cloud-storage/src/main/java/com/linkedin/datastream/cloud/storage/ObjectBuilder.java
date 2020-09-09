@@ -41,6 +41,8 @@ public class ObjectBuilder extends Thread {
     private final int _maxFileAge;
     private final int _maxInflightWriteLogCommits;
     private final ObjectCommitter _committer;
+    private final long _maxCorruptFileRetryCount;
+    private final boolean _neverUploadCorruptFile;
 
     /**
      * Constructor for ObjectBuilder.
@@ -60,7 +62,9 @@ public class ObjectBuilder extends Thread {
                          int maxFileAge,
                          int maxInflightWriteLogCommits,
                          ObjectCommitter committer,
-                         int queueSize) {
+                         int queueSize,
+                         long maxCorruptFileRetryCount,
+                         boolean neverUploadCorruptFile) {
         this._ioClass = ioClass;
         this._ioProperties = ioProperties;
         this._localDir = localDir;
@@ -68,6 +72,8 @@ public class ObjectBuilder extends Thread {
         this._maxFileAge = maxFileAge;
         this._maxInflightWriteLogCommits = maxInflightWriteLogCommits;
         this._committer = committer;
+        this._maxCorruptFileRetryCount = maxCorruptFileRetryCount;
+        this._neverUploadCorruptFile = neverUploadCorruptFile;
         this._packageQueue = new LinkedBlockingQueue<>(queueSize);
         this._registry = new HashMap<>();
     }
@@ -121,7 +127,9 @@ public class ObjectBuilder extends Thread {
                                     _maxFileSize,
                                     _maxFileAge,
                                     _maxInflightWriteLogCommits,
-                                    _committer)).write(aPackage);
+                                    _committer,
+                                    _maxCorruptFileRetryCount,
+                                    _neverUploadCorruptFile)).write(aPackage);
                 } else {
                     // broadcast signal
                     for (Map.Entry<String, WriteLog> entry : _registry.entrySet()) {

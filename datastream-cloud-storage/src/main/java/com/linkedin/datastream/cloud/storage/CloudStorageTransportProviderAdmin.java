@@ -41,6 +41,8 @@ public class CloudStorageTransportProviderAdmin implements TransportProviderAdmi
     public static final String CONFIG_MAX_FILE_SIZE = "maxFileSize";
     public static final String CONFIG_MAX_FILE_AGE = "maxFileAge";
     public static final String CONFIG_INFLIGHT_WRITE_LOG_COMMITS = "inflightCommits";
+    public static final String CONFIG_MAX_CORRUPT_RETRY_COUNT = "maxCorruptRetryCount";
+    public static final String CONFIG_NEVER_UPLOAD_CORRUPT_FILE = "neverUploadCorruptFile";
 
     public static final String CONFIG_IO_DOMAIN_PREFIX = "io";
     public static final String CONFIG_IO_CLASS = "class";
@@ -78,6 +80,8 @@ public class CloudStorageTransportProviderAdmin implements TransportProviderAdmi
                 .setMaxFileAge(tpProperties.getInt(CONFIG_MAX_FILE_AGE, 500))
                 .setMaxInflightWriteLogCommits(tpProperties.getInt(CONFIG_INFLIGHT_WRITE_LOG_COMMITS, 1))
                 .setObjectCommitter(committer)
+                .setMaxCorruptFileRetryCount(tpProperties.getLong(CONFIG_MAX_CORRUPT_RETRY_COUNT, 2))
+                .setNeverUploadCorruptFile(tpProperties.getBoolean(CONFIG_NEVER_UPLOAD_CORRUPT_FILE, false))
                 .build();
     }
 

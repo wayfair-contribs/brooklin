@@ -4,6 +4,7 @@
  *  See the NOTICE file in the project root for additional information regarding copyright ownership.
  */
 package com.linkedin.datastream.bigquery;
+
 import java.time.Duration;
 import java.util.Properties;
 

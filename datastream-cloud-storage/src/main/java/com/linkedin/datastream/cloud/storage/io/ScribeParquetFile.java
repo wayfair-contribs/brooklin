@@ -12,11 +12,15 @@ import org.apache.avro.Schema;
 import org.apache.avro.SchemaBuilder;
 import org.apache.avro.generic.GenericData;
 import org.apache.avro.generic.GenericRecord;
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.parquet.avro.AvroParquetWriter;
+import org.apache.parquet.format.converter.ParquetMetadataConverter;
+import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 
+import org.apache.parquet.hadoop.metadata.ParquetMetadata;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -88,5 +92,15 @@ public class ScribeParquetFile implements com.linkedin.datastream.cloud.storage.
     @Override
     public String getFileFormat() {
         return "parquet";
+    }
+
+    @Override
+    public boolean isCorrupt() {
+        try {
+            ParquetFileReader.readFooter(new Configuration(), _path, ParquetMetadataConverter.SKIP_ROW_GROUPS);
+            return false;
+        } catch (RuntimeException | IOException e) {
+            return true;
+        }
     }
 }

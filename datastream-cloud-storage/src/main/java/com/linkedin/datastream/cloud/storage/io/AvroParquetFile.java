@@ -126,14 +126,4 @@ public class AvroParquetFile implements com.linkedin.datastream.cloud.storage.io
     public String getFileFormat() {
         return "parquet";
     }
-
-    @Override
-    public boolean isCorrupt() {
-        try {
-            ParquetMetadata parquetMetadata = ParquetFileReader.readFooter(new Configuration(), _path, ParquetMetadataConverter.SKIP_ROW_GROUPS);
-            return parquetMetadata.getBlocks().isEmpty();
-        } catch (RuntimeException | IOException e) {
-            return true;
-        }
-    }
 }

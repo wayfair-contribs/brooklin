@@ -8,11 +8,15 @@ package com.linkedin.datastream.cloud.storage.io;
 import java.io.IOException;
 
 import com.linkedin.datastream.common.Package;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * File interface that should be implemented to support different file formats. Examples, SequenceFile, Parquet
  */
 public interface File {
+    static final Logger LOG = LoggerFactory.getLogger(File.class.getName());
+
     /**
      * returns the length of the file
      * @return length of the file
@@ -44,4 +48,24 @@ public interface File {
      * @return format/extension of the file
      */
     String getFileFormat();
+
+
+    default boolean isCorrupt() {
+        return false;
+    }
+
+    static void deleteFile(java.io.File file) {
+        LOG.info("Deleting file {}", file.toPath());
+        if (!file.delete()) {
+            LOG.warn("Failed to delete file {}.", file.toPath());
+        }
+
+        // clean crc files
+        final java.io.File crcFile = new java.io.File(file.getParent() + "/." + file.getName() + ".crc");
+        if (crcFile.exists() && crcFile.isFile()) {
+            if (!crcFile.delete()) {
+                LOG.warn("Failed to delete crc file {}.", crcFile.toPath());
+            }
+        }
+    }
 }

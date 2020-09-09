@@ -17,12 +17,6 @@ import com.linkedin.datastream.common.ReflectionUtils;
 import com.linkedin.datastream.common.SendCallback;
 import com.linkedin.datastream.common.VerifiableProperties;
 
-import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.Path;
-import org.apache.parquet.format.converter.ParquetMetadataConverter;
-import org.apache.parquet.hadoop.ParquetFileReader;
-import org.apache.parquet.hadoop.metadata.ParquetMetadata;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -46,10 +40,10 @@ public class WriteLog {
     private final int _maxFileAge;
     private final ObjectCommitter _committer;
     private final int _maxInflightWriteLogCommits;
+    private final long _maxCorruptFileRetryCount;
+    private final boolean _neverUploadCorruptFile;
 
     private final Meter _writeRateMeter;
-
-    private Exception exception = null;
 
     private File _file;
     private String _destination;
@@ -62,10 +56,10 @@ public class WriteLog {
 
     private int _inflightWriteLogCommits;
     private Object _counterLock;
-    private Configuration _conf = null;
     private long _prevFailedOffset;
     private long _lastSeenOffset;
 
+    private long _corruptFileCount;
 
     private long _fileStartTime;
 
@@ -85,7 +79,9 @@ public class WriteLog {
                     long maxFileSize,
                     int maxFileAge,
                     int maxInflightWriteLogCommits,
-                    ObjectCommitter committer) {
+                    ObjectCommitter committer,
+                    long maxCorruptFileRetryCount,
+                    boolean neverUploadCorruptFile) {
         this._ioClass = ioClass;
         this._ioProperties = ioProperties;
         this._maxInflightWriteLogCommits = maxInflightWriteLogCommits;
@@ -96,6 +92,9 @@ public class WriteLog {
         this._fileStartTime = System.currentTimeMillis();
         this._localDir = localDir;
         this._committer = committer;
+        this._maxCorruptFileRetryCount = maxCorruptFileRetryCount;
+        this._neverUploadCorruptFile = neverUploadCorruptFile;
+        this._corruptFileCount = 0;
         this._ackCallbacks = new ArrayList<>();
         this._recordMetadata = new ArrayList<>();
         this._destination = null;
@@ -104,7 +103,6 @@ public class WriteLog {
         this._minOffset = Long.MAX_VALUE;
         this._maxOffset = Long.MIN_VALUE;
         this._prevFailedOffset = Long.MAX_VALUE;
-        this._conf = new Configuration();
         this._counterLock = new Object();
         this._writeRateMeter = DynamicMetricsManager.getInstance().registerMetric(this.getClass().getSimpleName(),
                 "writeRate", Meter.class);
@@ -178,19 +176,13 @@ public class WriteLog {
         _recordMetadata.clear();
     }
 
-    private static void deleteFile(java.io.File file) {
-        LOG.info("Deleting file {}", file.toPath());
-        if (!file.delete()) {
-            LOG.warn("Failed to delete file {}.", file.toPath());
-        }
+    private boolean isInDiscardMode() {
+        return !(_prevFailedOffset == Long.MAX_VALUE);
+    }
 
-        // clean crc files
-        final java.io.File crcFile = new java.io.File(file.getParent() + "/." + file.getName() + ".crc");
-        if (crcFile.exists() && crcFile.isFile()) {
-            if (!crcFile.delete()) {
-                LOG.warn("Failed to delete crc file {}.", crcFile.toPath());
-            }
-        }
+    private void resetDiscardMode(long lastSeenOffset) {
+        _lastSeenOffset = lastSeenOffset;
+        _prevFailedOffset = Long.MAX_VALUE;
     }
 
     /**
@@ -201,33 +193,26 @@ public class WriteLog {
     public void write(Package aPackage) throws IOException, InterruptedException {
         if (aPackage.isDataPackage()) {
 
-            if (_prevFailedOffset != Long.MAX_VALUE) {
-                if (aPackage.getOffset() < _prevFailedOffset) {
-                    aPackage.getAckCallback().onCompletion(new DatastreamRecordMetadata(aPackage.getCheckpoint(),
+            if (isInDiscardMode()) {
+               if (aPackage.getOffset() == _lastSeenOffset + 1) {
+                   LOG.info("Ignoring message in topic {}, partition{}, and offset {} in discard mode",
+                           aPackage.getTopic(),
+                           aPackage.getPartition(),
+                           aPackage.getOffset());
+                   aPackage.getAckCallback().onCompletion(new DatastreamRecordMetadata(aPackage.getCheckpoint(),
                                     aPackage.getTopic(),
                                     aPackage.getPartition())
-                            , null);
-                    LOG.info("Packet with already processed offset arrived");
-                    return;
-                } else if (aPackage.getOffset() == _lastSeenOffset + 1) {
-                    aPackage.getAckCallback().onCompletion(new DatastreamRecordMetadata(aPackage.getCheckpoint(),
-                                    aPackage.getTopic(),
-                                    aPackage.getPartition())
-                            , new DatastreamTransientException("High offset record")); // TODO: add message
+                            , new DatastreamTransientException("In discard mode"));
                     _lastSeenOffset = aPackage.getOffset();
-                    LOG.info("Packet with future offset can't be processed");
                     return;
-                } else if (aPackage.getOffset() == _prevFailedOffset + 1) {
-                    _prevFailedOffset = Long.MAX_VALUE;
-                    LOG.info("Packet with desired offset found");
-                } else if (aPackage.getOffset() > _lastSeenOffset) {
-                    _prevFailedOffset = Long.MAX_VALUE;
-                    LOG.info("Packet drop");
+                } else if (aPackage.getOffset() <= _prevFailedOffset || aPackage.getOffset() > _lastSeenOffset + 1) {
+                   LOG.info("Resetting discard mode");
+                   resetDiscardMode(aPackage.getOffset());
                 }
             }
 
-            if (_prevFailedOffset == Long.MAX_VALUE) {
-                LOG.info("Start processing and persisting records in local file");
+            if (!isInDiscardMode()) {
+                LOG.info("Start processing and persisting records in a local file");
                 final String filePath = getFilePath(aPackage.getTopic(), String.valueOf(aPackage.getPartition()));
                 if (_file == null) {
                     _file = ReflectionUtils.createInstance(_ioClass, filePath, _ioProperties);
@@ -245,7 +230,7 @@ public class WriteLog {
                         aPackage.getTopic(),
                         aPackage.getPartition()));
             }
-            _lastSeenOffset = aPackage.getOffset();
+
         } else if (aPackage.isTryFlushSignal() || aPackage.isForceFlushSignal()) {
             if (_file == null) {
                 LOG.debug("Nothing to flush.");
@@ -259,29 +244,41 @@ public class WriteLog {
             waitForRoomInCommitBacklog();
             incrementInflightWriteLogCommits();
             _file.close();
-            LOG.info("File ready to be consumed by committer");
-            try {
-                ParquetMetadata parquetMetadata = ParquetFileReader.readFooter(_conf, (Path) _file, ParquetMetadataConverter.SKIP_ROW_GROUPS);
-                if (parquetMetadata.getBlocks().isEmpty()) {
-                    LOG.info("Corrupt file identified");
-                    _prevFailedOffset = _minOffset;
-                    exception = new DatastreamTransientException("Drop corrupt record"); // TODO: add message
+
+            if (_file.isCorrupt() && _corruptFileCount < _maxCorruptFileRetryCount) {
+                _corruptFileCount++;
+                LOG.info("Corrupt file identified for topic {}, partition {}, starting offset{} : {} - doing a retry",
+                        _topic,
+                        _partition,
+                        _minOffset,
+                        _file.getPath());
+                DynamicMetricsManager.getInstance().createOrUpdateMeter(
+                        this.getClass().getSimpleName(),
+                        _recordMetadata.get(0).getTopic(),
+                        "corruptFileCount",
+                        1);
+
+                _prevFailedOffset = _minOffset;
+                for (int i = 0; i < _ackCallbacks.size(); i++) {
+                    _ackCallbacks.get(i).onCompletion(_recordMetadata.get(i),
+                            new DatastreamTransientException("Drop corrupt records and retry"));
+                }
+
+                reset();
+                File.deleteFile(new java.io.File(_file.getPath()));
+            } else {
+
+                if (_file.isCorrupt() && _neverUploadCorruptFile) {
+                    LOG.warn("Discarding file {}", _file.getPath());
                     for (int i = 0; i < _ackCallbacks.size(); i++) {
-                        _ackCallbacks.get(i).onCompletion(_recordMetadata.get(i), exception);
+                        _ackCallbacks.get(i).onCompletion(_recordMetadata.get(i), null);
                     }
-                    DynamicMetricsManager.getInstance().createOrUpdateMeter(
-                            this.getClass().getSimpleName(),
-                            _recordMetadata.get(0).getTopic(),
-                            "errorCount",
-                            1);
-                    DynamicMetricsManager.getInstance().createOrUpdateMeter(
-                            this.getClass().getSimpleName(),
-                            _recordMetadata.get(0).getTopic(),
-                            "commitCount",
-                            1);
+
                     reset();
-                    deleteFile(new java.io.File(_file.getPath()));
+                    File.deleteFile(new java.io.File(_file.getPath()));
                 } else {
+
+                    LOG.info("File is ready to be consumed by committer");
                     _committer.commit(
                             _file.getPath(),
                             _file.getFileFormat(),
@@ -294,17 +291,14 @@ public class WriteLog {
                             new ArrayList<>(_recordMetadata),
                             () -> decrementInflightWriteLogCommitsAndNotify()
                     );
-                    LOG.info("File committed");
                     reset();
-                    if (aPackage.isForceFlushSignal()) {
-                        waitForCommitBacklogToClear();
-                    }
-
                 }
-            } catch (RuntimeException e) {
-                LOG.error("Parquet file check for corruption Failed" + e);
-            } catch (IOException e) {
-                LOG.error("Parquet file check for corruption Failed" + e);
+
+                _corruptFileCount = 0;
+            }
+
+            if (aPackage.isForceFlushSignal()) {
+                waitForCommitBacklogToClear();
             }
         }
     }

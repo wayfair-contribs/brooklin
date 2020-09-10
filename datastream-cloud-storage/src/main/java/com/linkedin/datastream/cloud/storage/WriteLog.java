@@ -8,7 +8,9 @@ package com.linkedin.datastream.cloud.storage;
 import java.io.IOException;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -61,6 +63,8 @@ public class WriteLog {
 
     private long _corruptFileCount;
 
+    private Map<Long, Boolean> _offsetTracker;
+
     private long _fileStartTime;
 
     /**
@@ -103,6 +107,7 @@ public class WriteLog {
         this._minOffset = Long.MAX_VALUE;
         this._maxOffset = Long.MIN_VALUE;
         this._prevFailedOffset = Long.MAX_VALUE;
+        this._offsetTracker = new HashMap<>();
         this._counterLock = new Object();
         this._writeRateMeter = DynamicMetricsManager.getInstance().registerMetric(this.getClass().getSimpleName(),
                 "writeRate", Meter.class);
@@ -174,6 +179,7 @@ public class WriteLog {
         _maxOffset = Long.MIN_VALUE;
         _ackCallbacks.clear();
         _recordMetadata.clear();
+        _offsetTracker.clear();
     }
 
     private boolean isInDiscardMode() {
@@ -193,6 +199,15 @@ public class WriteLog {
     public void write(Package aPackage) throws IOException, InterruptedException {
         if (aPackage.isDataPackage()) {
 
+            // only de-dupes in the current batch
+            if (_offsetTracker.containsKey(aPackage.getOffset())) {
+                LOG.info("Ignoring message in topic {}, partition{}, and offset {} as a duplicate in the batch",
+                        aPackage.getTopic(),
+                        aPackage.getPartition(),
+                        aPackage.getOffset());
+                return;
+            }
+
             if (isInDiscardMode()) {
                if (aPackage.getOffset() == _lastSeenOffset + 1) {
                    LOG.info("Ignoring message in topic {}, partition{}, and offset {} in discard mode",
@@ -201,8 +216,8 @@ public class WriteLog {
                            aPackage.getOffset());
                    aPackage.getAckCallback().onCompletion(new DatastreamRecordMetadata(aPackage.getCheckpoint(),
                                     aPackage.getTopic(),
-                                    aPackage.getPartition())
-                            , new DatastreamTransientException("In discard mode"));
+                                    aPackage.getPartition()),
+                           new DatastreamTransientException("In discard mode"));
                     _lastSeenOffset = aPackage.getOffset();
                     return;
                 } else if (aPackage.getOffset() <= _prevFailedOffset || aPackage.getOffset() > _lastSeenOffset + 1) {
@@ -212,7 +227,8 @@ public class WriteLog {
             }
 
             if (!isInDiscardMode()) {
-                LOG.info("Start processing and persisting records in a local file");
+                _lastSeenOffset = aPackage.getOffset();
+                LOG.debug("Start processing and persisting records in a local file");
                 final String filePath = getFilePath(aPackage.getTopic(), String.valueOf(aPackage.getPartition()));
                 if (_file == null) {
                     _file = ReflectionUtils.createInstance(_ioClass, filePath, _ioProperties);
@@ -223,6 +239,7 @@ public class WriteLog {
                 }
                 _writeRateMeter.mark();
                 _file.write(aPackage);
+                _offsetTracker.putIfAbsent(aPackage.getOffset(), true);
                 _maxOffset = (aPackage.getOffset() > _maxOffset) ? aPackage.getOffset() : _maxOffset;
                 _minOffset = (aPackage.getOffset() < _minOffset) ? aPackage.getOffset() : _minOffset;
                 _ackCallbacks.add(aPackage.getAckCallback());
@@ -241,17 +258,16 @@ public class WriteLog {
         if (_file.length() >= _maxFileSize ||
                 System.currentTimeMillis() - _fileStartTime >= _maxFileAge ||
                 aPackage.isForceFlushSignal()) {
-            waitForRoomInCommitBacklog();
-            incrementInflightWriteLogCommits();
             _file.close();
 
             if (_file.isCorrupt() && _corruptFileCount < _maxCorruptFileRetryCount) {
                 _corruptFileCount++;
-                LOG.info("Corrupt file identified on iteration {} for topic {}, partition {}, starting offset {} : {} - doing a retry",
+                LOG.info("Corrupt file identified on iteration {} for topic {}, partition {}, starting offset {}, end offset {} : {} - doing a retry",
                         _corruptFileCount,
                         _topic,
                         _partition,
                         _minOffset,
+                        _maxOffset,
                         _file.getPath());
                 DynamicMetricsManager.getInstance().createOrUpdateMeter(
                         this.getClass().getSimpleName(),
@@ -265,8 +281,8 @@ public class WriteLog {
                             new DatastreamTransientException("Drop corrupt records and retry"));
                 }
 
-                reset();
                 File.deleteFile(new java.io.File(_file.getPath()));
+                reset();
             } else {
 
                 if (_file.isCorrupt() && _neverUploadCorruptFile) {
@@ -280,8 +296,8 @@ public class WriteLog {
                         _ackCallbacks.get(i).onCompletion(_recordMetadata.get(i), null);
                     }
 
-                    reset();
                     File.deleteFile(new java.io.File(_file.getPath()));
+                    reset();
                 } else {
                     if (_file.isCorrupt()) {
                         LOG.warn("Uploading a corrupt file {} for topic {}, partition {}, starting offset {}, end offset {}",
@@ -291,6 +307,8 @@ public class WriteLog {
                                 _minOffset,
                                 _maxOffset);
                     }
+                    waitForRoomInCommitBacklog();
+                    incrementInflightWriteLogCommits();
                     _committer.commit(
                             _file.getPath(),
                             _file.getFileFormat(),

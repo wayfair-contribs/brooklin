@@ -156,7 +156,7 @@ public class JdbcCommon {
     }
 
     public static void createEmptyAvroStream(final OutputStream outStream) throws IOException {
-        final FieldAssembler<Schema> builder = SchemaBuilder.record("NiFi_ExecuteSQL_Record").namespace("com.wayfair.brooklin").fields();
+        final FieldAssembler<Schema> builder = SchemaBuilder.record("NiFi_ExecuteSQL_Record").namespace(AVRO_SCHEMA_NAMESPACE).fields();
         final Schema schema = builder.endRecord();
 
         final DatumWriter<GenericRecord> datumWriter = new GenericDatumWriter<>(schema);

@@ -128,6 +128,8 @@ public class JdbcCommon {
     public static final Pattern NUMBER_PATTERN = Pattern.compile("-?\\d+");
 
     public static final String MIME_TYPE_AVRO_BINARY = "application/avro-binary";
+    public static final String AVRO_SCHEMA_NAMESPACE = "com.wayfair.brooklin";
+    public static final String SOURCE_SQL_DATA_TYPE = "source.sql.datetype";
 
     public static long convertToAvroStream(final ResultSet rs, final OutputStream outStream, boolean convertNames) throws SQLException, IOException {
         return convertToAvroStream(rs, outStream, null, null, convertNames);
@@ -506,7 +508,7 @@ public class JdbcCommon {
             tableName = normalizeNameForAvro(tableName);
         }
 
-        final FieldAssembler<Schema> builder = SchemaBuilder.record(tableName).namespace("wayfair.bde.brooklin").fields();
+        final FieldAssembler<Schema> builder = SchemaBuilder.record(tableName).namespace(AVRO_SCHEMA_NAMESPACE).fields();
 
         /**
          * Some missing Avro types - Decimal, Date types. May need some additional work.
@@ -519,6 +521,7 @@ public class JdbcCommon {
              */
             String nameOrLabel = StringUtils.isNotEmpty(meta.getColumnLabel(i)) ? meta.getColumnLabel(i) :meta.getColumnName(i);
             String columnName = options.convertNames ? normalizeNameForAvro(nameOrLabel) : nameOrLabel;
+            String sqlType = null;
             switch (meta.getColumnType(i)) {
                 case CHAR:
                 case LONGNVARCHAR:
@@ -633,11 +636,17 @@ public class JdbcCommon {
                     break;
 
                 case TIMESTAMP:
+                    sqlType = "TIMESTAMP";
                 case TIMESTAMP_WITH_TIMEZONE:
+                    sqlType = "TIMESTAMP_WITH_TIMEZONE";
                 case microsoft.sql.Types.SMALLDATETIME: // -150 represents TSQL smalldatetime type
+                    sqlType = "microsoft.sql.Types.SMALLDATETIME";
                 case microsoft.sql.Types.DATETIME: // -151 represents TSQL datetime type
+                    sqlType = "microsoft.sql.Types.DATETIME";
                 case microsoft.sql.Types.DATETIMEOFFSET: // TSQL DATETIMEOFFSET
+                    sqlType = "microsoft.sql.Types.DATETIMEOFFSET";
                     final Schema timestampMilliType = LogicalTypes.timestampMillis().addToSchema(SchemaBuilder.builder().longType());
+                    timestampMilliType.addProp(SOURCE_SQL_DATA_TYPE, sqlType);
                     builder.name(columnName).type().unionOf().nullBuilder().endNull().and().type(timestampMilliType).endUnion().nullDefault();
                     break;
 

@@ -247,7 +247,8 @@ public class WriteLog {
 
             if (_file.isCorrupt() && _corruptFileCount < _maxCorruptFileRetryCount) {
                 _corruptFileCount++;
-                LOG.info("Corrupt file identified for topic {}, partition {}, starting offset{} : {} - doing a retry",
+                LOG.info("Corrupt file identified on iteration {} for topic {}, partition {}, starting offset {} : {} - doing a retry",
+                        _corruptFileCount,
                         _topic,
                         _partition,
                         _minOffset,
@@ -269,7 +270,12 @@ public class WriteLog {
             } else {
 
                 if (_file.isCorrupt() && _neverUploadCorruptFile) {
-                    LOG.warn("Discarding file {}", _file.getPath());
+                    LOG.warn("Discarding file {} for topic {}, partition {}, starting offset {}, end offset {}",
+                            _file.getPath(),
+                            _topic,
+                            _partition,
+                            _minOffset,
+                            _maxOffset);
                     for (int i = 0; i < _ackCallbacks.size(); i++) {
                         _ackCallbacks.get(i).onCompletion(_recordMetadata.get(i), null);
                     }
@@ -277,6 +283,14 @@ public class WriteLog {
                     reset();
                     File.deleteFile(new java.io.File(_file.getPath()));
                 } else {
+                    if (_file.isCorrupt()) {
+                        LOG.warn("Uploading a corrupt file {} for topic {}, partition {}, starting offset {}, end offset {}",
+                                _file.getPath(),
+                                _topic,
+                                _partition,
+                                _minOffset,
+                                _maxOffset);
+                    }
                     _committer.commit(
                             _file.getPath(),
                             _file.getFileFormat(),

@@ -10,13 +10,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
-import com.linkedin.datastream.common.DatastreamTransientException;
-import com.linkedin.datastream.common.DatastreamRecordMetadata;
-import com.linkedin.datastream.common.Package;
-import com.linkedin.datastream.common.ReflectionUtils;
-import com.linkedin.datastream.common.SendCallback;
-import com.linkedin.datastream.common.VerifiableProperties;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -24,6 +17,13 @@ import com.codahale.metrics.Meter;
 
 import com.linkedin.datastream.cloud.storage.committer.ObjectCommitter;
 import com.linkedin.datastream.cloud.storage.io.File;
+
+import com.linkedin.datastream.common.DatastreamRecordMetadata;
+import com.linkedin.datastream.common.DatastreamTransientException;
+import com.linkedin.datastream.common.Package;
+import com.linkedin.datastream.common.ReflectionUtils;
+import com.linkedin.datastream.common.SendCallback;
+import com.linkedin.datastream.common.VerifiableProperties;
 
 import com.linkedin.datastream.metrics.DynamicMetricsManager;
 
@@ -277,8 +277,6 @@ public class WriteLog {
                     reset();
                     File.deleteFile(new java.io.File(_file.getPath()));
                 } else {
-
-                    LOG.info("File is ready to be consumed by committer");
                     _committer.commit(
                             _file.getPath(),
                             _file.getFileFormat(),

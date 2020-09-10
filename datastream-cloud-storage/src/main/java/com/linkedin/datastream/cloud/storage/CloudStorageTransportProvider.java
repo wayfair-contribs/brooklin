@@ -267,11 +267,17 @@ public class CloudStorageTransportProvider implements TransportProvider {
          return this;
       }
 
+      /**
+       * Set max retry count
+       */
       public CloudStorageTransportProviderBuilder setMaxCorruptFileRetryCount(long maxCorruptFileRetryCount) {
          this._maxCorruptFileRetryCount = maxCorruptFileRetryCount;
          return this;
       }
 
+      /**
+       * Set upload status for corrupt file
+       */
       public CloudStorageTransportProviderBuilder setNeverUploadCorruptFile(boolean neverUploadCorruptFile) {
          this._neverUploadCorruptFile = neverUploadCorruptFile;
          return this;

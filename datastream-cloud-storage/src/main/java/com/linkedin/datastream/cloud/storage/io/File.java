@@ -7,9 +7,11 @@ package com.linkedin.datastream.cloud.storage.io;
 
 import java.io.IOException;
 
-import com.linkedin.datastream.common.Package;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import com.linkedin.datastream.common.Package;
+
 
 /**
  * File interface that should be implemented to support different file formats. Examples, SequenceFile, Parquet
@@ -54,6 +56,9 @@ public interface File {
         return false;
     }
 
+    /**
+     * delete the file
+     */
     static void deleteFile(java.io.File file) {
         LOG.info("Deleting file {}", file.toPath());
         if (!file.delete()) {

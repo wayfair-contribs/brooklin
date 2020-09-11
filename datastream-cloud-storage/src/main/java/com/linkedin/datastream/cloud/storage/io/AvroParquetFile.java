@@ -17,7 +17,6 @@ import org.apache.parquet.avro.AvroParquetWriter;
 import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

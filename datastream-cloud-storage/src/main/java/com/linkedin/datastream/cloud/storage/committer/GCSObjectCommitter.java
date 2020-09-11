@@ -87,21 +87,6 @@ public class GCSObjectCommitter implements ObjectCommitter {
                 "uploadRate", Meter.class);
     }
 
-    private static void deleteFile(File file) {
-        LOG.info("Deleting file {}", file.toPath());
-        if (!file.delete()) {
-            LOG.warn("Failed to delete file {}.", file.toPath());
-        }
-
-        // clean crc files
-        final File crcFile = new File(file.getParent() + "/." + file.getName() + ".crc");
-        if (crcFile.exists() && crcFile.isFile()) {
-            if (!crcFile.delete()) {
-                LOG.warn("Failed to delete crc file {}.", crcFile.toPath());
-            }
-        }
-    }
-
     private static String getBucketName(final String destination) {
         String[] bucketApplicationDatastream = destination.split("/");
         return bucketApplicationDatastream[0];
@@ -163,9 +148,7 @@ public class GCSObjectCommitter implements ObjectCommitter {
                         .newBuilder(BlobId.of(getBucketName(destination), objectName))
                         .setContentType(Files.probeContentType(file.toPath()))
                         .build();
-
                 LOG.info("Committing Object {}", objectName);
-
                 if (file.getTotalSpace() <= _writeAtOnceMaxFileSize) {
                     Blob blob = _storage.create(sourceBlob, Files.readAllBytes(file.toPath()));
                 } else {
@@ -189,7 +172,7 @@ public class GCSObjectCommitter implements ObjectCommitter {
                 exception = new DatastreamTransientException(e);
             }
 
-            deleteFile(file);
+            com.linkedin.datastream.cloud.storage.io.File.deleteFile(file);
 
             LOG.info("Successfully created object {}", objectName);
             for (int i = 0; i < ackCallbacks.size(); i++) {

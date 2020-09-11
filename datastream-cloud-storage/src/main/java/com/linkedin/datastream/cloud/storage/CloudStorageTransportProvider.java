@@ -86,7 +86,9 @@ public class CloudStorageTransportProvider implements TransportProvider {
                  builder._maxFileAge,
                  builder._maxInflightWriteLogCommits,
                  builder._committer,
-                 builder._objectBuilderQueueSize));
+                 builder._objectBuilderQueueSize,
+                 builder._maxCorruptFileRetryCount,
+                 builder._neverUploadCorruptFile));
       }
       for (ObjectBuilder objectBuilder : _objectBuilders) {
           objectBuilder.start();
@@ -180,6 +182,8 @@ public class CloudStorageTransportProvider implements TransportProvider {
       private int _maxFileAge;
       private int _maxInflightWriteLogCommits;
       private ObjectCommitter _committer;
+      private long _maxCorruptFileRetryCount;
+      private boolean _neverUploadCorruptFile;
       private String _ioClass;
       private VerifiableProperties _ioProperties;
 
@@ -260,6 +264,22 @@ public class CloudStorageTransportProvider implements TransportProvider {
        */
       public CloudStorageTransportProviderBuilder setIOProperties(VerifiableProperties ioProperties) {
          this._ioProperties = ioProperties;
+         return this;
+      }
+
+      /**
+       * Set max retry count
+       */
+      public CloudStorageTransportProviderBuilder setMaxCorruptFileRetryCount(long maxCorruptFileRetryCount) {
+         this._maxCorruptFileRetryCount = maxCorruptFileRetryCount;
+         return this;
+      }
+
+      /**
+       * Set upload status for corrupt file
+       */
+      public CloudStorageTransportProviderBuilder setNeverUploadCorruptFile(boolean neverUploadCorruptFile) {
+         this._neverUploadCorruptFile = neverUploadCorruptFile;
          return this;
       }
 

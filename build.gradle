@@ -165,7 +165,6 @@ project(':datastream-bigquery') {
     compile "org.apache.kafka:kafka-clients:$kafkaClientsVersion"
 
     compile "io.confluent:kafka-avro-serializer:$kafkaSchemaRegistryClientVersion"
-    compile "io.confluent:kafka-schema-registry:$kafkaSchemaRegistryVersion"
     compile "io.confluent:kafka-schema-registry-client:$kafkaSchemaRegistryClientVersion"
 
     compile "com.google.cloud:google-cloud-storage:$googleCloudStorageVersion"
@@ -199,7 +198,6 @@ project(':datastream-cloud-storage') {
     compile "org.apache.parquet:parquet-column:$parquetWriterVersion"
 
     compile "io.confluent:kafka-avro-serializer:$kafkaSchemaRegistryClientVersion"
-    compile "io.confluent:kafka-schema-registry:$kafkaSchemaRegistryVersion"
     compile "io.confluent:kafka-schema-registry-client:$kafkaSchemaRegistryClientVersion"
 
     compile "com.google.cloud:google-cloud-storage:$googleCloudStorageVersion"

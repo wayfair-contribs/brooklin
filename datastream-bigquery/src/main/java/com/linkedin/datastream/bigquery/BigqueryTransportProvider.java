@@ -5,11 +5,15 @@
  */
 package com.linkedin.datastream.bigquery;
 
+import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolver;
 import com.linkedin.datastream.common.VerifiableProperties;
 import com.linkedin.datastream.server.api.transport.buffered.AbstractBatchBuilder;
 import com.linkedin.datastream.server.api.transport.buffered.AbstractBufferedTransportProvider;
@@ -23,21 +27,30 @@ public class BigqueryTransportProvider extends AbstractBufferedTransportProvider
 
     private final BigqueryBatchCommitter _committer;
 
+    private final int maxBatchAge;
+
     private BigqueryTransportProvider(BigqueryTransportProviderBuilder builder) {
-        super(builder._transportProviderName);
+        this(builder._transportProviderName, builder._committer,
+                IntStream.range(0, builder._batchBuilderCount)
+                    .mapToObj(i -> new BatchBuilder(
+                        builder._maxBatchSize,
+                        builder._maxBatchAge,
+                        builder._maxInflightBatchCommits,
+                        builder._committer,
+                        builder._batchBuilderQueueSize,
+                        builder._translatorProperties,
+                        builder.schemaEvolver)).collect(Collectors.toList()),
+                builder._maxBatchAge);
+    }
 
-        this._committer = builder._committer;
+    BigqueryTransportProvider(final String name, final BigqueryBatchCommitter committer, final List<BatchBuilder> batchBuilders, final int maxBatchAge) {
+        super(name, batchBuilders);
+        _committer = committer;
+        this.maxBatchAge = maxBatchAge;
+        init();
+    }
 
-        // initialize and start object builders
-        for (int i = 0; i < builder._batchBuilderCount; i++) {
-            _batchBuilders.add(new BatchBuilder(
-                    builder._maxBatchSize,
-                    builder._maxBatchAge,
-                    builder._maxInflightBatchCommits,
-                    builder._committer,
-                    builder._batchBuilderQueueSize,
-                    builder._translatorProperties));
-        }
+    private void init() {
         for (AbstractBatchBuilder batchBuilder : _batchBuilders) {
             batchBuilder.start();
         }
@@ -50,8 +63,8 @@ public class BigqueryTransportProvider extends AbstractBufferedTransportProvider
                         objectBuilder.assign(new com.linkedin.datastream.common.Package.PackageBuilder().buildTryFlushSignalPackage());
                     }
                 },
-                builder._maxBatchAge / 2,
-                builder._maxBatchAge / 2,
+                maxBatchAge / 2,
+                maxBatchAge / 2,
                 TimeUnit.MILLISECONDS);
     }
 
@@ -72,6 +85,7 @@ public class BigqueryTransportProvider extends AbstractBufferedTransportProvider
         private int _maxInflightBatchCommits;
         private BigqueryBatchCommitter _committer;
         private VerifiableProperties _translatorProperties;
+        private BigquerySchemaEvolver schemaEvolver;
 
         /**
          * Set the name of the transport provider
@@ -134,6 +148,16 @@ public class BigqueryTransportProvider extends AbstractBufferedTransportProvider
          */
         public BigqueryTransportProviderBuilder setTranslatorProperties(VerifiableProperties translatorProperties) {
             this._translatorProperties = translatorProperties;
+            return this;
+        }
+
+        /**
+         * Set the Bigquery Schema Evolver
+         * @param schemaEvolver the BigquerySchemaEvolver
+         * @return the Builder
+         */
+        public BigqueryTransportProviderBuilder setBigquerySchemaEvolver(final BigquerySchemaEvolver schemaEvolver) {
+            this.schemaEvolver = schemaEvolver;
             return this;
         }
 

@@ -1,18 +1,19 @@
 /**
- *  Copyright 2020 Wayfair LLC. All rights reserved.
- *  Licensed under the BSD 2-Clause License. See the LICENSE file in the project root for license information.
- *  See the NOTICE file in the project root for additional information regarding copyright ownership.
+ * Copyright 2020 Wayfair LLC. All rights reserved.
+ * Licensed under the BSD 2-Clause License. See the LICENSE file in the project root for license information.
+ * See the NOTICE file in the project root for additional information regarding copyright ownership.
  */
 package com.linkedin.datastream.server.api.transport.buffered;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import com.google.common.collect.ImmutableList;
 
 import com.linkedin.datastream.common.BrooklinEnvelope;
 import com.linkedin.datastream.common.Package;
@@ -24,7 +25,7 @@ import com.linkedin.datastream.server.api.transport.TransportProvider;
 /**
  * Extend this abstract class to implement buffered writes to the destination.
  */
-public abstract class AbstractBufferedTransportProvider  implements TransportProvider {
+public abstract class AbstractBufferedTransportProvider implements TransportProvider {
     protected static final Logger LOG = LoggerFactory.getLogger(AbstractBufferedTransportProvider.class.getName());
 
     protected static final String KAFKA_ORIGIN_TOPIC = "kafka-origin-topic";
@@ -33,13 +34,14 @@ public abstract class AbstractBufferedTransportProvider  implements TransportPro
 
     protected final String _transportProviderName;
     protected final ScheduledExecutorService _scheduler = new ScheduledThreadPoolExecutor(1);
-    protected CopyOnWriteArrayList<AbstractBatchBuilder> _batchBuilders = new CopyOnWriteArrayList<>();
+    final protected ImmutableList<? extends AbstractBatchBuilder> _batchBuilders;
 
     protected volatile boolean _isClosed;
 
-    protected AbstractBufferedTransportProvider(String transportProviderName) {
+    protected AbstractBufferedTransportProvider(final String transportProviderName, final List<? extends AbstractBatchBuilder> batchBuilders) {
         this._isClosed = false;
         this._transportProviderName = transportProviderName;
+        _batchBuilders = ImmutableList.copyOf(batchBuilders);
     }
 
     private void delegate(final com.linkedin.datastream.common.Package aPackage) {
@@ -48,7 +50,7 @@ public abstract class AbstractBufferedTransportProvider  implements TransportPro
 
     @Override
     public void send(String destination, DatastreamProducerRecord record, SendCallback onComplete) {
-        for (final BrooklinEnvelope env :  record.getEvents()) {
+        for (final BrooklinEnvelope env : record.getEvents()) {
             final Package aPackage = new Package.PackageBuilder()
                     .setRecord(new Record(env.getKey(), env.getValue()))
                     .setTopic(env.getMetadata().get(KAFKA_ORIGIN_TOPIC))
@@ -86,6 +88,7 @@ public abstract class AbstractBufferedTransportProvider  implements TransportPro
             }
 
             shutdownCommitter();
+            _scheduler.shutdown();
         } finally {
             _isClosed = true;
         }

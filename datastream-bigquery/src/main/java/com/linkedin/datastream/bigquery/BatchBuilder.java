@@ -10,6 +10,7 @@ import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolver;
 import com.linkedin.datastream.common.DatastreamRecordMetadata;
 import com.linkedin.datastream.common.Package;
 import com.linkedin.datastream.common.VerifiableProperties;
@@ -30,6 +31,7 @@ public class BatchBuilder extends AbstractBatchBuilder {
     private final int _maxInflightCommits;
     private final BigqueryBatchCommitter _committer;
     private final SchemaRegistry _schemaRegistry;
+    private final BigquerySchemaEvolver schemaEvolver;
 
     /**
      * Constructor for BatchBuilder
@@ -45,14 +47,33 @@ public class BatchBuilder extends AbstractBatchBuilder {
                         int maxInflightCommits,
                         BigqueryBatchCommitter committer,
                         int queueSize,
-                        VerifiableProperties translatorProperties) {
+                        VerifiableProperties translatorProperties,
+                        BigquerySchemaEvolver schemaEvolver) {
+        this(
+                maxBatchSize,
+                maxBatchAge,
+                maxInflightCommits,
+                committer,
+                queueSize,
+                new SchemaRegistry(new VerifiableProperties(translatorProperties.getDomainProperties(CONFIG_SCHEMA_REGISTRY))),
+                schemaEvolver
+        );
+    }
+
+    BatchBuilder(final int maxBatchSize,
+                 final int maxBatchAge,
+                 final int maxInflightCommits,
+                 final BigqueryBatchCommitter committer,
+                 final int queueSize,
+                 final SchemaRegistry schemaRegistry,
+                 final BigquerySchemaEvolver schemaEvolver) {
         super(queueSize);
-        this._maxBatchSize = maxBatchSize;
-        this._maxBatchAge = maxBatchAge;
-        this._maxInflightCommits = maxInflightCommits;
-        this._committer = committer;
-        this._schemaRegistry = new SchemaRegistry(
-                new VerifiableProperties(translatorProperties.getDomainProperties(CONFIG_SCHEMA_REGISTRY)));
+        _maxBatchSize = maxBatchSize;
+        _maxBatchAge = maxBatchAge;
+        _maxInflightCommits = maxInflightCommits;
+        _committer = committer;
+        _schemaRegistry = schemaRegistry;
+        this.schemaEvolver = schemaEvolver;
     }
 
     @Override
@@ -74,7 +95,8 @@ public class BatchBuilder extends AbstractBatchBuilder {
                                     _maxBatchAge,
                                     _maxInflightCommits,
                                     _schemaRegistry,
-                                    _committer)).write(aPackage);
+                                    _committer,
+                                    schemaEvolver)).write(aPackage);
                 } else {
                     // broadcast signal
                     for (Map.Entry<String, AbstractBatch> entry : _registry.entrySet()) {

@@ -173,6 +173,7 @@ project(':datastream-bigquery') {
     compile project(':datastream-server')
     compile project(':datastream-utils')
 
+    testCompile project(':datastream-testcommon')
     testCompile "org.mockito:mockito-core:$mockitoVersion"
 
     tasks.create(name: "copyDependentLibs", type: Copy) {
@@ -350,7 +351,7 @@ project(':datastream-tools') {
     compile "commons-cli:commons-cli:$commonsCliVersion"
   }
 
-  tasks.create(name: "releaseTarGz", dependsOn: configurations.archives.artifacts, type: Tar) {
+  tasks.create(name: "releaseTarGz", group: "distribution", dependsOn: configurations.archives.artifacts, type: Tar) {
     description = "Create Brooklin release tarball"
     baseName = "${rootProject.name}"
     into { "${property('baseName')}-$rootProject.version" }
@@ -384,6 +385,15 @@ project(':datastream-tools') {
     from(project(':datastream-kafka-connector').jar) { into("libs/") }
     from(project(':datastream-kafka-connector').configurations.runtime) { into("libs/") }
     duplicatesStrategy 'exclude'
+  }
+  tasks.create(name: "copyDependentLibs", type: Copy) {
+    from (configurations.runtime) {
+    }
+    into "$buildDir/dependent-libs"
+  }
+
+  jar {
+    dependsOn 'copyDependentLibs'
   }
 }
 

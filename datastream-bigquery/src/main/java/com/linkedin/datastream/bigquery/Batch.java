@@ -8,15 +8,16 @@ package com.linkedin.datastream.bigquery;
 import java.nio.BufferUnderflowException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 import org.apache.avro.generic.GenericRecord;
 import org.apache.kafka.common.errors.SerializationException;
 
 import com.google.cloud.bigquery.InsertAllRequest;
 import com.google.cloud.bigquery.Schema;
-
 import io.confluent.kafka.serializers.KafkaAvroDeserializer;
 
+import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolver;
 import com.linkedin.datastream.bigquery.translator.RecordTranslator;
 import com.linkedin.datastream.bigquery.translator.SchemaTranslator;
 import com.linkedin.datastream.common.DatastreamRecordMetadata;
@@ -41,6 +42,7 @@ public class Batch extends AbstractBatch {
     private SchemaRegistry _schemaRegistry;
     private String _destination;
     private KafkaAvroDeserializer _deserializer;
+    private BigquerySchemaEvolver schemaEvolver;
 
     /**
      * Constructor for Batch.
@@ -54,7 +56,8 @@ public class Batch extends AbstractBatch {
                  int maxBatchAge,
                  int maxInflightWriteLogCommits,
                  SchemaRegistry schemaRegistry,
-                 BigqueryBatchCommitter committer) {
+                 BigqueryBatchCommitter committer,
+                 BigquerySchemaEvolver schemaEvolver) {
         super(maxInflightWriteLogCommits);
         this._maxBatchSize = maxBatchSize;
         this._maxBatchAge = maxBatchAge;
@@ -65,6 +68,7 @@ public class Batch extends AbstractBatch {
         this._destination = null;
         this._schemaRegistry = schemaRegistry;
         this._deserializer = _schemaRegistry.getDeserializer();
+        this.schemaEvolver = schemaEvolver;
     }
 
     private void reset() {
@@ -107,12 +111,6 @@ public class Batch extends AbstractBatch {
                 }
             }
 
-            if (_schema == null) {
-                _avroSchema = _schemaRegistry.getSchemaByTopic(aPackage.getTopic());
-                _schema = SchemaTranslator.translate(_avroSchema);
-                _committer.setDestTableSchema(_destination, _schema);
-            }
-
             GenericRecord record;
             try {
                 record = (GenericRecord) _deserializer.deserialize(
@@ -139,23 +137,43 @@ public class Batch extends AbstractBatch {
                 }
             }
 
-            _batch.add(RecordTranslator.translate(record, _avroSchema));
+            processAvroSchema(record.getSchema());
+
+            _batch.add(RecordTranslator.translate(record));
 
             _ackCallbacks.add(aPackage.getAckCallback());
             _recordMetadata.add(new DatastreamRecordMetadata(aPackage.getCheckpoint(),
                     aPackage.getTopic(),
                     aPackage.getPartition()));
             _sourceTimestamps.add(aPackage.getTimestamp());
-        } else if (aPackage.isTryFlushSignal() || aPackage.isForceFlushSignal()) {
-            if (_batch.isEmpty()) {
-                LOG.debug("Nothing to flush.");
-                return;
-            }
         }
 
-        if (_batch.size() >= _maxBatchSize ||
-                System.currentTimeMillis() - _batchCreateTimeStamp >= _maxBatchAge ||
-                aPackage.isForceFlushSignal()) {
+        if (aPackage.isForceFlushSignal() || _batch.size() >= _maxBatchSize ||
+                System.currentTimeMillis() - _batchCreateTimeStamp >= _maxBatchAge) {
+            flush(aPackage.isForceFlushSignal());
+        }
+    }
+
+    private void processAvroSchema(final org.apache.avro.Schema avroSchema) {
+        final Optional<Schema> newBQSchema;
+        if (_avroSchema == null) {
+            newBQSchema = Optional.of(SchemaTranslator.translate(avroSchema));
+        } else if (!_avroSchema.equals(avroSchema)) {
+            newBQSchema = Optional.of(schemaEvolver.evolveSchema(_schema, SchemaTranslator.translate(avroSchema)));
+        } else {
+            newBQSchema = Optional.empty();
+        }
+        newBQSchema.ifPresent(schema -> {
+            _avroSchema = avroSchema;
+            _schema = schema;
+            _committer.setDestTableSchema(_destination, _schema);
+        });
+    }
+
+    private void flush(final boolean force) throws InterruptedException {
+        if (_batch.isEmpty()) {
+            LOG.debug("Nothing to flush.");
+        } else {
             waitForRoomInCommitBacklog();
             incrementInflightWriteLogCommits();
             _committer.commit(
@@ -167,8 +185,7 @@ public class Batch extends AbstractBatch {
                     () -> decrementInflightWriteLogCommitsAndNotify()
             );
             reset();
-
-            if (aPackage.isForceFlushSignal()) {
+            if (force) {
                 waitForCommitBacklogToClear();
             }
         }

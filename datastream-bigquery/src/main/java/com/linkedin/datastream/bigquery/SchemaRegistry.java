@@ -9,7 +9,6 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.apache.avro.Schema;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -40,10 +39,18 @@ public class SchemaRegistry {
      * @param props schema registry client properties.
      */
     public SchemaRegistry(VerifiableProperties props) {
-        this._schemaRegistryURL = props.getString(CONFIG_SCHEMA_REGISTRY_URL);
-        this._schemaRegistryClient = new CachedSchemaRegistryClient(_schemaRegistryURL, Integer.MAX_VALUE);
-        this._schemaNameSuffix = props.getString(CONFIG_SCHEMA_NAME_SUFFIX, DEFAULT_CONFLUENT_SCHEMA_NAME_SUFFIX);
-        this._deserializer = new KafkaAvroDeserializer(_schemaRegistryClient);
+        this(
+                props.getString(CONFIG_SCHEMA_REGISTRY_URL),
+                new CachedSchemaRegistryClient(props.getString(CONFIG_SCHEMA_REGISTRY_URL), Integer.MAX_VALUE),
+                props.getString(CONFIG_SCHEMA_NAME_SUFFIX, DEFAULT_CONFLUENT_SCHEMA_NAME_SUFFIX)
+        );
+    }
+
+    SchemaRegistry(final String schemaRegistryURL, final SchemaRegistryClient schemaRegistryClient, final String schemaNameSuffix) {
+        _schemaRegistryURL = schemaRegistryURL;
+        _schemaRegistryClient = schemaRegistryClient;
+        _schemaNameSuffix = schemaNameSuffix;
+        _deserializer = new KafkaAvroDeserializer(_schemaRegistryClient);
     }
 
     /**

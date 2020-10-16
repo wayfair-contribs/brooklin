@@ -7,9 +7,7 @@ package com.linkedin.datastream.bigquery.translator;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
-
 import java.nio.ByteBuffer;
-
 import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -442,22 +440,40 @@ public class RecordTranslator {
     }
 
     private static TableRow getMetadata() {
-        return new TableRow().set("ingest_timestamp", new DateTime(new Date(System.currentTimeMillis())));
+        return getMetadata(new DateTime(new Date(System.currentTimeMillis())));
+    }
+
+    /**
+     * Get metadata for this record.
+     * @param ingestTimestamp a DateTime representing the ingestion timestamp
+     * @return a TableRow containing the metadata
+     */
+    public static TableRow getMetadata(final DateTime ingestTimestamp) {
+        return new TableRow().set("ingest_timestamp", ingestTimestamp);
     }
 
     /**
      * translate given avro record into BQ row object.
      * @param avroRecord avro record
-     * @param avroSchema avro schema
      * @return BQ row
      */
-    public static InsertAllRequest.RowToInsert translate(GenericRecord avroRecord, Schema avroSchema) {
-        if (avroSchema.getType() != org.apache.avro.Schema.Type.RECORD) {
+    public static InsertAllRequest.RowToInsert translate(final GenericRecord avroRecord) {
+        return translate(avroRecord, getMetadata());
+    }
+
+    /**
+     * Translate the given avro record and metadata into a BQ row object.
+     * @param avroRecord a GenericRecord
+     * @param metadata a TableRow containing metadata
+     * @return BQ row
+     */
+    public static InsertAllRequest.RowToInsert translate(final GenericRecord avroRecord, final TableRow metadata) {
+        if (avroRecord.getSchema().getType() != org.apache.avro.Schema.Type.RECORD) {
             throw new IllegalArgumentException("The root of the record's schema should be a RECORD type.");
         }
 
         TableRow row = translateRecord((GenericData.Record) avroRecord);
-        row.set("__metadata", getMetadata());
+        row.set("__metadata", metadata);
 
         return InsertAllRequest.RowToInsert.of(row);
     }

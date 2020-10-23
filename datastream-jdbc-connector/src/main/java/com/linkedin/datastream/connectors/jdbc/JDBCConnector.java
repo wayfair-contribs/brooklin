@@ -50,7 +50,7 @@ public class JDBCConnector implements Connector {
 
     private static final String DS_CONFIG_MAX_TASKS = "maxTasks";
     private static final String DS_CONFIG_TABLE = "table";
-    private static final String DS_CONFIG_INCREMENTING_COLUMN_NAME = "incrementingColumName";
+    private static final String DS_CONFIG_INCREMENTING_COLUMN_NAME = "incrementingColumnName";
     private static final String DS_CONFIG_INCREMENTING_INITIAL = "incrementingInitial";
     private static final String DS_CONFIG_QUERY = "query";
     private static final String DS_CONFIG_POLL_FREQUENCY_MS = "pollFrequencyMS";

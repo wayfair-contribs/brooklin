@@ -64,6 +64,9 @@ public class KafkaTransportProviderAdmin<K, V> implements TransportProviderAdmin
   public static final String CONFIG_NUM_PRODUCERS_PER_CONNECTOR = "numProducersPerConnector";
   public static final String CONFIG_PRODUCERS_PER_TASK = "producersPerTask";
   public static final String CONFIG_METRICS_NAMES_PREFIX = "metricsNamesPrefix";
+  public static final String CONFIG_KEY_TRANSLATOR = "key.translator";
+  public static final String CONFIG_VALUE_TRANSLATOR = "value.translator";
+  public static final String CONFIG_TRANSLATOR_INCLUDE_SCHEMA = "value.translator.includeSchema";
   public static final String DOMAIN_TOPIC = "topic";
   public static final String MIN_INSYNC_REPLICAS_CONFIG = "min.insync.replicas";
   public static final String TOPIC_RETENTION_MS = "retention.ms";

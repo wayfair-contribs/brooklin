@@ -8,16 +8,26 @@ package com.linkedin.datastream.common.translator;
 /**
  * Interface to translate schema from one format into another format
  * @param <ST>
- * @param <DT>
+ * @param <IT>
  */
-public interface SchemaTranslator<ST, DT> {
+public interface SchemaTranslator<ST, IT> {
     /**
-     * Translates values from internal format into T format
+     * Translates schema into internal format
      *
-     * @param sourceRecord - source schema
+     * @param sourceSchema - source schema
      * @return The translated record in T format
      */
-    default DT translateSchema(ST sourceRecord) throws Exception {
+    default IT translateSchemaToInternalFormat(ST sourceSchema) throws Exception {
+        return null;
+    }
+
+    /**
+     * Translates schema from internal format into ST format
+     *
+     * @param destinationSchema - source schema
+     * @return The translated record in T format
+     */
+    default ST translateSchemaFromInternalFormat(IT destinationSchema) throws Exception {
         return null;
     }
 }

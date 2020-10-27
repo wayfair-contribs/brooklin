@@ -15,8 +15,7 @@ import org.slf4j.LoggerFactory;
  */
 public class GenericRecordTranslator implements RecordTranslator<GenericRecord, GenericRecord>, SchemaTranslator<Schema, Schema> {
 
-    private static final String CLASS_NAME = GenericRecordTranslator.class.getSimpleName();
-    private static final Logger LOG = LoggerFactory.getLogger(CLASS_NAME);
+    private static final Logger LOG = LoggerFactory.getLogger(GenericRecordTranslator.class.getSimpleName());
     /**
      * Translates values of record into the internal format
      *

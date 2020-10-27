@@ -26,8 +26,6 @@ import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.TopicExistsException;
-import org.apache.kafka.common.serialization.LongDeserializer;
-import org.apache.kafka.common.serialization.LongSerializer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.slf4j.Logger;
@@ -144,13 +142,13 @@ public class KafkaCustomCheckpointProvider implements CustomCheckpointProvider<L
     }
 
     @Override
-    public Long getSafeCheckpoint() {
+    public Long getSafeCheckpoint() throws Exception {
         _checkpoint = (_checkpoint == null) ? getCommitted() : _checkpoint;
         return _checkpoint;
     }
 
     @Override
-    public Long getCommitted() {
+    public Long getCommitted() throws Exception {
         Long checkpoint = null;
         long endOffset = -1;
 
@@ -166,7 +164,12 @@ public class KafkaCustomCheckpointProvider implements CustomCheckpointProvider<L
         while (currentOffset < endOffset - 1) {
             for (ConsumerRecord<String, String> record : records) {
                 if (record.key().equals(_taskId)) {
-                    checkpoint = Long.parseLong(record.value());
+                    try {
+                        checkpoint = Long.parseLong(record.value());
+                    } catch (NumberFormatException n) {
+                        LOG.error("corrupted checkpoint data was encountered in topic {}. {}", _topic, n);
+                        throw n;
+                    }
                 }
                 currentOffset = record.offset();
             }

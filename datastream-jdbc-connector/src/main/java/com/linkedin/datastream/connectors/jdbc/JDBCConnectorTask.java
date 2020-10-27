@@ -5,7 +5,7 @@
  */
 package com.linkedin.datastream.connectors.jdbc;
 
-import com.linkedin.datastream.common.translator.LongTranslator;
+
 import java.io.IOException;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -27,6 +27,7 @@ import org.slf4j.LoggerFactory;
 import com.linkedin.datastream.common.BrooklinEnvelope;
 import com.linkedin.datastream.common.BrooklinEnvelopeMetadataConstants;
 import com.linkedin.datastream.common.DatastreamRecordMetadata;
+import com.linkedin.datastream.common.translator.LongTranslator;
 import com.linkedin.datastream.common.translator.ResultSetTranslator;
 import com.linkedin.datastream.server.DatastreamEventProducer;
 import com.linkedin.datastream.server.DatastreamProducerRecordBuilder;
@@ -94,8 +95,8 @@ public class JDBCConnectorTask {
             Long checkpoint = (record.get(_incrementingColumnName) instanceof Integer) ?
                     Long.valueOf((Integer) record.get(_incrementingColumnName)) :
                     (Long) record.get(_incrementingColumnName);
-            if (checkpoint == null ) {
-                LOG.error("failed to send row because checkpoint is null {}", _datastreamName);
+            if (checkpoint == null) {
+                LOG.error("failed to send row because checkpoint is null in datastream: {}", _datastreamName);
                 return;
             }
             GenericRecord checkpointRecord = longTranslator.translateToInternalFormat(checkpoint);
@@ -142,10 +143,16 @@ public class JDBCConnectorTask {
     }
 
     private void poll() {
+        Long checkpoint = null;
         LOG.info("poll initiated for {}", _datastreamName);
 
         mayCommitCheckpoint();
-        Long checkpoint = _checkpointProvider.getSafeCheckpoint();
+        try {
+            checkpoint = _checkpointProvider.getSafeCheckpoint();
+        } catch (Exception e) {
+            LOG.error("Ignoring this poll because of exception caught {}", e);
+            return;
+        }
         checkpoint = (checkpoint == null) ? getInitialCheckpoint() : checkpoint;
 
         LOG.info("start checkpoint for datastream:{} is {} with destination {}", _datastreamName, checkpoint, _destinationTopic);

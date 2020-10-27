@@ -77,7 +77,7 @@ public class ResultSetTranslator implements RecordTranslator<ResultSet, ArrayLis
 
     @Override
     public ArrayList<GenericRecord> translateToInternalFormat(ResultSet rs) throws SQLException {
-        Schema schema = this.translateSchema(rs);
+        Schema schema = this.translateSchemaToInternalFormat(rs);
         ArrayList<GenericRecord> outPutArray = new ArrayList<>();
         final ResultSetMetaData meta = rs.getMetaData();
         final int nrOfColumns = meta.getColumnCount();
@@ -215,7 +215,7 @@ public class ResultSetTranslator implements RecordTranslator<ResultSet, ArrayLis
      * @throws SQLException if any error occurs during conversion
      */
     @Override
-    public Schema translateSchema(ResultSet rs) throws SQLException {
+    public Schema translateSchemaToInternalFormat(ResultSet rs) throws SQLException {
         final ResultSetMetaData meta = rs.getMetaData();
         final int nrOfColumns = meta.getColumnCount();
         String tableName = AVRO_SCHEMA_RECORD_NAME;

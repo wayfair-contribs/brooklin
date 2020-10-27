@@ -8,6 +8,9 @@ package com.linkedin.datastream.common.translator;
 import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericRecord;
 
+/**
+ * Class to translate between String and internal format
+ */
 public class StringTranslator implements RecordTranslator<String, GenericRecord>, SchemaTranslator<Schema, String> {
     /**
      * Translates values from internal format into T format

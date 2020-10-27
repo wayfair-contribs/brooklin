@@ -90,9 +90,12 @@ public class KafkaTransportProvider<K, V> implements TransportProvider {
       String errorMessage = "Bootstrap servers are not set";
       ErrorLogger.logAndThrowDatastreamRuntimeException(LOG, errorMessage, null);
     }
-    _keyTranslatorClass = kafkaTransportProviderProperties.getProperty(KafkaTransportProviderAdmin.CONFIG_KEY_TRANSLATOR);
-    _valueTranslatorClass = kafkaTransportProviderProperties.getProperty(KafkaTransportProviderAdmin.CONFIG_VALUE_TRANSLATOR);
-    _translatorIncludeSchema = kafkaTransportProviderProperties.getBoolean(KafkaTransportProviderAdmin.CONFIG_TRANSLATOR_INCLUDE_SCHEMA, false);
+    _keyTranslatorClass = kafkaTransportProviderProperties.getString(KafkaTransportProviderAdmin.CONFIG_KEY_TRANSLATOR,
+            KafkaTransportProviderAdmin.DEFAULT_TRANSLATOR);
+    _valueTranslatorClass = kafkaTransportProviderProperties.getString(KafkaTransportProviderAdmin.CONFIG_VALUE_TRANSLATOR,
+            KafkaTransportProviderAdmin.DEFAULT_TRANSLATOR);
+    _translatorIncludeSchema = kafkaTransportProviderProperties.getBoolean(KafkaTransportProviderAdmin.CONFIG_TRANSLATOR_INCLUDE_SCHEMA,
+            false);
     // initialize metrics
     _dynamicMetricsManager = DynamicMetricsManager.getInstance();
     _metricsNamesPrefix = metricsNamesPrefix == null ? CLASS_NAME : metricsNamesPrefix + CLASS_NAME;

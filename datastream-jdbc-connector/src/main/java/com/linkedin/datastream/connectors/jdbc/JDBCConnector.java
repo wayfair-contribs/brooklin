@@ -91,7 +91,6 @@ public class JDBCConnector implements Connector {
         _checkpointStoreTopic = config.getProperty(CONFIG_CHECKPOINT_STORE_TOPIC);
 
         _jdbcUser = config.getString(CONFIG_JDBC_USER);
-
         try {
             _jdbcUserPassword = Passwords.get(config.getString(CONFIG_JDBC_CREDENTIAL_NAME));
         } catch (IOException e) {

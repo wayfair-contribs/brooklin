@@ -20,23 +20,21 @@ import tech.allegro.schema.json2avro.converter.JsonAvroConverter;
 /**
  * Connector that implements RecordTranslator and SchemaTranslator to support Json.
  */
-public class JsonTranslator implements RecordTranslator<String, GenericRecord>, SchemaTranslator<Schema, String> {
+public class JsonTranslator implements RecordTranslator<String, GenericRecord>, SchemaTranslator<String, Schema> {
+    private static final Logger LOG = LoggerFactory.getLogger(JsonTranslator.class.getSimpleName());
+    private static final String SCHEMA_FIELD_NAME = "schema";
+    private static final String PAYLOAD_FIELD_NAME = "payload";
 
-    public static final String SCHEMA_FIELD_NAME = "schema";
-    public static final String PAYLOAD_FIELD_NAME = "payload";
     /**
-     * Translates values from internal format into Json String
+     * Translates schema from internal format into ST format
      *
-     * @param sourceRecord - Source schema to be translated
+     * @param destinationSchema - source schema
      * @return The translated record in T format
      */
     @Override
-    public String translateSchema(Schema sourceRecord) throws Exception {
-        return sourceRecord.toString();
+    public String translateSchemaFromInternalFormat(Schema destinationSchema) throws Exception {
+        return destinationSchema.toString();
     }
-
-    private static final String CLASS_NAME = JsonTranslator.class.getSimpleName();
-    private static final Logger LOG = LoggerFactory.getLogger(CLASS_NAME);
 
     /**
      * Translates values from internal format into Json String.
@@ -52,7 +50,7 @@ public class JsonTranslator implements RecordTranslator<String, GenericRecord>, 
         if (includeSchema) {
             ObjectMapper objectMapper = new ObjectMapper();
             ObjectNode withSchemaJson = JsonNodeFactory.instance.objectNode();
-            withSchemaJson.set(SCHEMA_FIELD_NAME, objectMapper.readTree(translateSchema(record.getSchema())));
+            withSchemaJson.set(SCHEMA_FIELD_NAME, objectMapper.readTree(translateSchemaFromInternalFormat(record.getSchema())));
             withSchemaJson.set(PAYLOAD_FIELD_NAME, objectMapper.readTree(converter.convertToJson(record)));
             return withSchemaJson.toString();
         } else {

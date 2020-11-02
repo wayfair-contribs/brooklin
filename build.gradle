@@ -224,6 +224,7 @@ project(':datastream-server-api') {
   dependencies {
     compile project(':datastream-common')
     compile project(':datastream-utils')
+    testCompile "org.mockito:mockito-core:$mockitoVersion"
   }
 }
 

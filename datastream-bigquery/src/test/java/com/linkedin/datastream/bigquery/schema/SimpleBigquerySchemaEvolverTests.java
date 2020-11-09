@@ -138,4 +138,23 @@ public class SimpleBigquerySchemaEvolverTests {
         assertEquals(baseSchema, evolvedSchema);
     }
 
+    @Test
+    public void testSchemaFieldOrderingNotChangedOnAdd() {
+        final Schema baseSchema = Schema.of(
+                Field.of("int", StandardSQLTypeName.INT64),
+                Field.of("string", StandardSQLTypeName.STRING)
+        );
+        final Schema newSchema = Schema.of(
+                Field.of("string", StandardSQLTypeName.STRING),
+                Field.of("int", StandardSQLTypeName.INT64),
+                Field.of("newInt", StandardSQLTypeName.INT64)
+        );
+        final Schema evolvedSchema = schemaEvolver.evolveSchema(baseSchema, newSchema);
+        assertEquals(evolvedSchema, Schema.of(
+                Field.of("int", StandardSQLTypeName.INT64),
+                Field.of("string", StandardSQLTypeName.STRING),
+                Field.newBuilder("newInt", StandardSQLTypeName.INT64).setMode(Field.Mode.NULLABLE).build()
+        ));
+    }
+
 }

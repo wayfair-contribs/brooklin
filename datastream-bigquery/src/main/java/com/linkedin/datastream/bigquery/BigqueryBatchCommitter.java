@@ -123,35 +123,50 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
 
         final Optional<Table> optionalExistingTable = Optional.ofNullable(_bigquery.getTable(tableId));
         if (optionalExistingTable.isPresent()) {
-            final Table existingTable = optionalExistingTable.get();
-            final Schema existingTableSchema = Optional.ofNullable(existingTable.getDefinition().getSchema())
-                    .orElseThrow(() -> new IllegalStateException(String.format("schema not defined for table: %s", tableId)));
-            if (!desiredTableSchema.equals(existingTableSchema)) {
-                final Schema evolvedSchema = schemaEvolver.evolveSchema(existingTableSchema, desiredTableSchema);
-                if (!existingTableSchema.equals(evolvedSchema)) {
-                    try {
-                        existingTable.toBuilder()
-                                .setDefinition(createTableDefinition(evolvedSchema, timePartitioning))
-                                .build().update();
-                    } catch (BigQueryException e) {
-                        LOG.warn("Failed to update table {}", destination, e);
+            updateTable(destination, desiredTableSchema, timePartitioning, tableId, optionalExistingTable.get());
+        } else {
+            createTable(destination, desiredTableSchema, timePartitioning, tableId);
+        }
+    }
+
+    private void updateTable(final String destination, final Schema desiredTableSchema,
+                             final TimePartitioning timePartitioning, final TableId tableId, final Table existingTable) {
+        final Schema existingTableSchema = Optional.ofNullable(existingTable.getDefinition().getSchema())
+                .orElseThrow(() -> new IllegalStateException(String.format("schema not defined for table: %s", tableId)));
+        if (!desiredTableSchema.equals(existingTableSchema)) {
+            final Schema evolvedSchema = schemaEvolver.evolveSchema(existingTableSchema, desiredTableSchema);
+            if (!existingTableSchema.equals(evolvedSchema)) {
+                try {
+                    existingTable.toBuilder()
+                            .setDefinition(createTableDefinition(evolvedSchema, timePartitioning))
+                            .build().update();
+                } catch (BigQueryException e) {
+                    final Table currentTable = _bigquery.getTable(tableId);
+                    final Schema currentTableSchema = currentTable.getDefinition().getSchema();
+                    if (existingTableSchema.equals(currentTableSchema)) {
+                        LOG.error("Failed to update table {}", destination, e);
                         throw e;
+                    } else {
+                        LOG.warn("Concurrent table schema update exception encountered for table {}. Retrying update with new base schema...", destination, e);
+                        updateTable(destination, desiredTableSchema, timePartitioning, tableId, currentTable);
                     }
-                    LOG.debug("Table {} updated with evolved schema", destination);
                 }
-            } else {
-                LOG.debug("Table {} already exist", destination);
+                LOG.debug("Table {} updated with evolved schema", destination);
             }
         } else {
-            final TableInfo tableInfo = TableInfo.newBuilder(tableId, createTableDefinition(desiredTableSchema, timePartitioning)).build();
-            try {
-                _bigquery.create(tableInfo);
-            } catch (BigQueryException e) {
-                LOG.warn("Failed to create table {}", destination, e);
-                throw e;
-            }
-            LOG.info("Table {} created successfully", destination);
+            LOG.debug("Table {} already exist", destination);
         }
+    }
+
+    private void createTable(final String destination, final Schema desiredTableSchema, final TimePartitioning timePartitioning, final TableId tableId) {
+        final TableInfo tableInfo = TableInfo.newBuilder(tableId, createTableDefinition(desiredTableSchema, timePartitioning)).build();
+        try {
+            _bigquery.create(tableInfo);
+        } catch (BigQueryException e) {
+            LOG.warn("Failed to create table {}", destination, e);
+            throw e;
+        }
+        LOG.info("Table {} created successfully", destination);
     }
 
     private static TableDefinition createTableDefinition(final Schema schema, final TimePartitioning timePartitioning) {

@@ -32,13 +32,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
-import static org.mockito.Mockito.any;
-import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.eq;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertTrue;
 
@@ -276,7 +270,7 @@ public class BigqueryBatchCommitterTests {
 
         latch.await(1, TimeUnit.SECONDS);
 
-        verify(bigQuery).getTable(tableId);
+        verify(bigQuery, times(2)).getTable(tableId);
         verify(bigQuery, never()).create(any(TableInfo.class));
         verify(tableBuilder).setDefinition(evolvedTableDefinition);
         verify(bigQuery, never()).insertAll(any(InsertAllRequest.class));
@@ -286,5 +280,99 @@ public class BigqueryBatchCommitterTests {
         final Exception actualException = exceptionArgumentCaptor.getValue();
         assertTrue(actualException instanceof DatastreamTransientException);
         assertEquals(actualException.getCause(), exception);
+    }
+
+
+    @Test
+    public void testEvolveTableSchemaConcurrencyFailure() throws InterruptedException {
+        final TableId tableId = TableId.of("dataset_name", "table_name");
+        final long retention = -1L;
+        final String destination = String.join("/", tableId.getDataset(), tableId.getTable(), Long.toString(retention));
+        final Schema newSchema = Schema.of(
+                Field.of("string", StandardSQLTypeName.STRING),
+                Field.of("int", StandardSQLTypeName.INT64),
+                Field.of("new_string", StandardSQLTypeName.STRING)
+        );
+        batchCommitter.setDestTableSchema(destination, newSchema);
+
+        final Schema existingSchema = Schema.of(
+                Field.of("string", StandardSQLTypeName.STRING),
+                Field.of("int", StandardSQLTypeName.INT64)
+        );
+        final TableDefinition existingTableDefinition = StandardTableDefinition.of(existingSchema);
+        final Table existingTable = mock(Table.class);
+
+        when(existingTable.getDefinition()).thenReturn(existingTableDefinition);
+
+        final Schema newBaseSchema = Schema.of(
+                Field.of("string", StandardSQLTypeName.STRING),
+                Field.of("int", StandardSQLTypeName.INT64),
+                Field.newBuilder("new_int", StandardSQLTypeName.INT64).setMode(Field.Mode.NULLABLE).build()
+        );
+        final TableDefinition newBaseTableDefinition = StandardTableDefinition.of(newBaseSchema);
+        final Table newBaseTable = mock(Table.class);
+
+        when(newBaseTable.getDefinition()).thenReturn(newBaseTableDefinition);
+
+        when(bigQuery.getTable(tableId)).thenReturn(existingTable).thenReturn(newBaseTable);
+
+        final Table.Builder tableBuilder1 = mock(Table.Builder.class);
+        final Schema evolvedSchema1 = schemaEvolver.evolveSchema(existingSchema, newSchema);
+        final TableDefinition evolvedTableDefinition1 = StandardTableDefinition.newBuilder()
+                .setSchema(evolvedSchema1)
+                .setTimePartitioning(TimePartitioning.of(TimePartitioning.Type.DAY))
+                .build();
+        when(tableBuilder1.setDefinition(evolvedTableDefinition1)).thenReturn(tableBuilder1);
+        final Table evolvedTable1 = mock(Table.class);
+        when(tableBuilder1.build()).thenReturn(evolvedTable1);
+        when(existingTable.toBuilder()).thenReturn(tableBuilder1);
+
+        final BigQueryException exception = new BigQueryException(400, "Test update table failure");
+        when(evolvedTable1.update()).thenThrow(exception);
+
+        final Table.Builder tableBuilder2 = mock(Table.Builder.class);
+        final Schema evolvedSchema2 = schemaEvolver.evolveSchema(newBaseSchema, newSchema);
+        final TableDefinition evolvedTableDefinition2 = StandardTableDefinition.newBuilder()
+                .setSchema(evolvedSchema2)
+                .setTimePartitioning(TimePartitioning.of(TimePartitioning.Type.DAY))
+                .build();
+        when(tableBuilder2.setDefinition(evolvedTableDefinition2)).thenReturn(tableBuilder2);
+        final Table evolvedTable2 = mock(Table.class);
+        when(tableBuilder2.build()).thenReturn(evolvedTable2);
+        when(newBaseTable.toBuilder()).thenReturn(tableBuilder2);
+
+
+        final CommitCallback commitCallback = mock(CommitCallback.class);
+        final CountDownLatch latch = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            latch.countDown();
+            return null;
+        }).when(commitCallback).commited();
+
+        final ImmutableList<InsertAllRequest.RowToInsert> rowsToInsert = ImmutableList.of(
+                InsertAllRequest.RowToInsert.of(ImmutableMap.of(
+                        "string", "test",
+                        "int", 123
+                ))
+        );
+        batchCommitter.commit(rowsToInsert, destination, ImmutableList.of(), ImmutableList.of(
+                new DatastreamRecordMetadata("test", "test", 0)
+                ),
+                ImmutableList.of(), commitCallback);
+
+        latch.await(1, TimeUnit.SECONDS);
+
+        verify(bigQuery, times(2)).getTable(tableId);
+        verify(bigQuery, never()).create(any(TableInfo.class));
+
+        verify(tableBuilder1).setDefinition(evolvedTableDefinition1);
+        verify(evolvedTable1).update();
+
+        verify(tableBuilder2).setDefinition(evolvedTableDefinition2);
+        verify(evolvedTable2).update();
+
+        final TableId insertTableId = TableId.of(tableId.getDataset(),
+                String.format("%s$%s", tableId.getTable(), LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"))));
+        verify(bigQuery).insertAll(InsertAllRequest.of(insertTableId, rowsToInsert));
     }
 }

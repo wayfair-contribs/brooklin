@@ -18,7 +18,6 @@ import java.util.concurrent.ConcurrentMap;
 import javax.sql.DataSource;
 
 import org.apache.commons.dbcp.BasicDataSource;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

@@ -65,7 +65,7 @@ public class BigqueryTransportProviderAdmin implements TransportProviderAdmin {
                 .setMaxBatchSize(tpProperties.getInt(CONFIG_MAX_BATCH_SIZE, 100000))
                 .setMaxBatchAge(tpProperties.getInt(CONFIG_MAX_BATCH_AGE, 500))
                 .setMaxInflightBatchCommits(tpProperties.getInt(CONFIG_MAX_INFLIGHT_COMMITS, 1))
-                .setCommitter(new BigqueryBatchCommitter(schemaEvolver, committerProperties))
+                .setCommitter(new BigqueryBatchCommitter(committerProperties))
                 .setTranslatorProperties(new VerifiableProperties(tpProperties.getDomainProperties(CONFIG_TRANSLATOR_DOMAIN_PREFIX)))
                 .setBigquerySchemaEvolver(schemaEvolver)
                 .build();

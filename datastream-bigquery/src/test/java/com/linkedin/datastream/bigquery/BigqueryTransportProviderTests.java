@@ -75,7 +75,7 @@ public class BigqueryTransportProviderTests {
                 .mapToObj(i -> new GenericRecordBuilder(schema).set("message", "payload " + i).build())
                 .collect(Collectors.toList());
 
-        final BigqueryBatchCommitter committer = new BigqueryBatchCommitter(bigQuery, 1, schemaEvolver);
+        final BigqueryBatchCommitter committer = new BigqueryBatchCommitter(bigQuery, 1);
 
         final BatchBuilder batchBuilder = new BatchBuilder(
                 maxBatchSize, maxBatchAge, maxInflightCommits, committer, queueSize, schemaRegistry, schemaEvolver
@@ -157,7 +157,7 @@ public class BigqueryTransportProviderTests {
                         .set("new_message", "new payload " + i).build())
                 .collect(Collectors.toList());
 
-        final BigqueryBatchCommitter committer = new BigqueryBatchCommitter(bigQuery, 1, schemaEvolver);
+        final BigqueryBatchCommitter committer = new BigqueryBatchCommitter(bigQuery, 1);
 
         final BatchBuilder batchBuilder = new BatchBuilder(
                 maxBatchSize, maxBatchAge, maxInflightCommits, committer, queueSize, schemaRegistry, schemaEvolver

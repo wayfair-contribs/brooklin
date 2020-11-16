@@ -52,18 +52,14 @@ import com.linkedin.datastream.server.api.transport.buffered.CommitCallback;
 public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequest.RowToInsert>> {
     private static final Logger LOG = LoggerFactory.getLogger(BigqueryBatchCommitter.class.getName());
 
-    private ConcurrentMap<String, Schema> _destTableSchemas;
+    private final ConcurrentMap<String, Schema> _destTableSchemas;
+    private final ConcurrentMap<String, BigquerySchemaEvolver> _destTableSchemaEvolvers;
 
     private static final String CONFIG_THREADS = "threads";
 
     private final ExecutorService _executor;
-    private final int _numOfCommitterThreads;
 
     private final BigQuery _bigquery;
-
-    private final BigquerySchemaEvolver schemaEvolver;
-
-    protected static final String CONFIG_SCHEMA_EVOLVER_DOMAIN_PREFIX = "schemaEvolver";
 
     private static String sanitizeTableName(String tableName) {
         return tableName.replaceAll("[^A-Za-z0-9_]+", "_");
@@ -71,21 +67,17 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
 
     /**
      * Constructor.
-     * @param schemaEvolver the BigquerySchemaEvolver
      * @param properties the VerifiableProperties
      */
-    public BigqueryBatchCommitter(final BigquerySchemaEvolver schemaEvolver, final VerifiableProperties properties) {
-        this(constructClientFromProperties(properties), properties.getInt(CONFIG_THREADS, 1), schemaEvolver);
+    public BigqueryBatchCommitter(final VerifiableProperties properties) {
+        this(constructClientFromProperties(properties), properties.getInt(CONFIG_THREADS, 1));
     }
 
-    BigqueryBatchCommitter(final BigQuery bigQuery, final int numThreads, final BigquerySchemaEvolver schemaEvolver) {
+    BigqueryBatchCommitter(final BigQuery bigQuery, final int numThreads) {
         this._bigquery = bigQuery;
-        this._numOfCommitterThreads = numThreads;
-        this.schemaEvolver = schemaEvolver;
-        this._executor = Executors.newFixedThreadPool(_numOfCommitterThreads);
-
+        this._executor = Executors.newFixedThreadPool(numThreads);
         this._destTableSchemas = new ConcurrentHashMap<>();
-
+        this._destTableSchemaEvolvers = new ConcurrentHashMap<>();
     }
 
     private static BigQuery constructClientFromProperties(final VerifiableProperties properties) {
@@ -134,7 +126,7 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
         final Schema existingTableSchema = Optional.ofNullable(existingTable.getDefinition().getSchema())
                 .orElseThrow(() -> new IllegalStateException(String.format("schema not defined for table: %s", tableId)));
         if (!desiredTableSchema.equals(existingTableSchema)) {
-            final Schema evolvedSchema = schemaEvolver.evolveSchema(existingTableSchema, desiredTableSchema);
+            final Schema evolvedSchema = _destTableSchemaEvolvers.get(destination).evolveSchema(existingTableSchema, desiredTableSchema);
             if (!existingTableSchema.equals(evolvedSchema)) {
                 try {
                     existingTable.toBuilder()
@@ -183,6 +175,10 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
      */
     public void setDestTableSchema(String dest, Schema schema) {
         _destTableSchemas.put(dest, schema);
+    }
+
+    public void setDestTableSchemaEvolver(final String dest, final BigquerySchemaEvolver schemaEvolver) {
+        _destTableSchemaEvolvers.put(dest, schemaEvolver);
     }
 
     @Override

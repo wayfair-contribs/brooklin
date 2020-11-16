@@ -42,7 +42,7 @@ public class Batch extends AbstractBatch {
     private SchemaRegistry _schemaRegistry;
     private String _destination;
     private KafkaAvroDeserializer _deserializer;
-    private BigquerySchemaEvolver schemaEvolver;
+    private final BigquerySchemaEvolver _schemaEvolver;
 
     /**
      * Constructor for Batch.
@@ -68,7 +68,7 @@ public class Batch extends AbstractBatch {
         this._destination = null;
         this._schemaRegistry = schemaRegistry;
         this._deserializer = _schemaRegistry.getDeserializer();
-        this.schemaEvolver = schemaEvolver;
+        this._schemaEvolver = schemaEvolver;
     }
 
     private void reset() {
@@ -109,6 +109,7 @@ public class Batch extends AbstractBatch {
                             "/" + aPackage.getTopic() +
                             "/" + datasetRetentionTableSuffix[1];
                 }
+                _committer.setDestTableSchemaEvolver(_destination, _schemaEvolver);
             }
 
             GenericRecord record;
@@ -159,7 +160,7 @@ public class Batch extends AbstractBatch {
         if (_avroSchema == null) {
             newBQSchema = Optional.of(SchemaTranslator.translate(avroSchema));
         } else if (!_avroSchema.equals(avroSchema)) {
-            newBQSchema = Optional.of(schemaEvolver.evolveSchema(_schema, SchemaTranslator.translate(avroSchema)));
+            newBQSchema = Optional.of(_schemaEvolver.evolveSchema(_schema, SchemaTranslator.translate(avroSchema)));
         } else {
             newBQSchema = Optional.empty();
         }

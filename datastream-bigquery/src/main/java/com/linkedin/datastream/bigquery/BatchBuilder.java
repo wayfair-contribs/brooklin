@@ -31,7 +31,7 @@ public class BatchBuilder extends AbstractBatchBuilder {
     private final int _maxInflightCommits;
     private final BigqueryBatchCommitter _committer;
     private final SchemaRegistry _schemaRegistry;
-    private final BigquerySchemaEvolver schemaEvolver;
+    private final BigquerySchemaEvolver _schemaEvolver;
 
     /**
      * Constructor for BatchBuilder
@@ -73,7 +73,7 @@ public class BatchBuilder extends AbstractBatchBuilder {
         _maxInflightCommits = maxInflightCommits;
         _committer = committer;
         _schemaRegistry = schemaRegistry;
-        this.schemaEvolver = schemaEvolver;
+        _schemaEvolver = schemaEvolver;
     }
 
     @Override
@@ -96,7 +96,7 @@ public class BatchBuilder extends AbstractBatchBuilder {
                                     _maxInflightCommits,
                                     _schemaRegistry,
                                     _committer,
-                                    schemaEvolver)).write(aPackage);
+                                    _schemaEvolver)).write(aPackage);
                 } else {
                     // broadcast signal
                     for (Map.Entry<String, AbstractBatch> entry : _registry.entrySet()) {

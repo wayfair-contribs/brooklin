@@ -51,7 +51,7 @@ public class BigqueryBatchCommitterTests {
     void beforeTest() {
         bigQuery = mock(BigQuery.class);
         schemaEvolver = new SimpleBigquerySchemaEvolver();
-        batchCommitter = new BigqueryBatchCommitter(bigQuery, 1, schemaEvolver);
+        batchCommitter = new BigqueryBatchCommitter(bigQuery, 1);
     }
 
     @Test
@@ -63,6 +63,7 @@ public class BigqueryBatchCommitterTests {
                 Field.of("string", StandardSQLTypeName.STRING),
                 Field.of("int", StandardSQLTypeName.INT64)
         );
+        batchCommitter.setDestTableSchemaEvolver(destination, schemaEvolver);
         batchCommitter.setDestTableSchema(destination, schema);
 
         when(bigQuery.getTable(tableId)).thenReturn(null);
@@ -107,6 +108,7 @@ public class BigqueryBatchCommitterTests {
                 Field.of("string", StandardSQLTypeName.STRING),
                 Field.of("int", StandardSQLTypeName.INT64)
         );
+        batchCommitter.setDestTableSchemaEvolver(destination, schemaEvolver);
         batchCommitter.setDestTableSchema(destination, schema);
 
         when(bigQuery.getTable(tableId)).thenReturn(null);
@@ -158,6 +160,7 @@ public class BigqueryBatchCommitterTests {
                 Field.of("int", StandardSQLTypeName.INT64),
                 Field.of("new_string", StandardSQLTypeName.STRING)
         );
+        batchCommitter.setDestTableSchemaEvolver(destination, schemaEvolver);
         batchCommitter.setDestTableSchema(destination, newSchema);
 
         final Schema existingSchema = Schema.of(
@@ -221,6 +224,7 @@ public class BigqueryBatchCommitterTests {
                 Field.of("int", StandardSQLTypeName.INT64),
                 Field.of("new_string", StandardSQLTypeName.STRING)
         );
+        batchCommitter.setDestTableSchemaEvolver(destination, schemaEvolver);
         batchCommitter.setDestTableSchema(destination, newSchema);
 
         final Schema existingSchema = Schema.of(
@@ -293,6 +297,7 @@ public class BigqueryBatchCommitterTests {
                 Field.of("int", StandardSQLTypeName.INT64),
                 Field.of("new_string", StandardSQLTypeName.STRING)
         );
+        batchCommitter.setDestTableSchemaEvolver(destination, schemaEvolver);
         batchCommitter.setDestTableSchema(destination, newSchema);
 
         final Schema existingSchema = Schema.of(

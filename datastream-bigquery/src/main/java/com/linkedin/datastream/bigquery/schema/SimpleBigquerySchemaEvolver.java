@@ -74,7 +74,7 @@ public class SimpleBigquerySchemaEvolver implements BigquerySchemaEvolver {
             } else {
                 mergedSubFields = null;
             }
-            if (baseField.getMode() == Field.Mode.REQUIRED && newField.getMode() == Field.Mode.REQUIRED) {
+            if (baseField.getMode() == newField.getMode()) {
                 mergedField = newField.toBuilder().setType(newField.getType(), mergedSubFields).build();
             } else {
                 mergedField = newField.toBuilder().setType(newField.getType(), mergedSubFields).setMode(Field.Mode.NULLABLE).build();

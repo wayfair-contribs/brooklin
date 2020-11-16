@@ -75,39 +75,162 @@ public class SimpleBigquerySchemaEvolverTests {
     @Test
     public void testAddNewSchemaField() {
         final Schema baseSchema = Schema.of(
-                Field.of("string", StandardSQLTypeName.STRING),
-                Field.of("int", StandardSQLTypeName.INT64)
+                Field.newBuilder("string", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build(),
+                Field.newBuilder("int", StandardSQLTypeName.INT64).setMode(Field.Mode.REQUIRED).build()
                 );
         final Schema newSchema = Schema.of(
-                Field.of("string", StandardSQLTypeName.STRING),
-                Field.of("int", StandardSQLTypeName.INT64),
-                Field.of("new_string", StandardSQLTypeName.STRING)
+                Field.newBuilder("string", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build(),
+                Field.newBuilder("int", StandardSQLTypeName.INT64).setMode(Field.Mode.REQUIRED).build(),
+                Field.newBuilder("new_string", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build()
         );
         final Schema evolvedSchema = schemaEvolver.evolveSchema(baseSchema, newSchema);
         assertEquals(Schema.of(
-                Field.of("string", StandardSQLTypeName.STRING),
-                Field.of("int", StandardSQLTypeName.INT64),
+                Field.newBuilder("string", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build(),
+                Field.newBuilder("int", StandardSQLTypeName.INT64).setMode(Field.Mode.REQUIRED).build(),
                 Field.newBuilder("new_string", StandardSQLTypeName.STRING).setMode(Field.Mode.NULLABLE).build()
         ), evolvedSchema);
     }
 
     @Test
-    public void testRemoveSchemaField() {
+    public void testAddNewSchemaFieldWithRequiredNestedStructure() {
         final Schema baseSchema = Schema.of(
-                Field.of("string", StandardSQLTypeName.STRING),
-                Field.of("int", StandardSQLTypeName.INT64),
-                Field.of("old_string", StandardSQLTypeName.STRING)
+                Field.newBuilder("string", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build(),
+                Field.newBuilder("int", StandardSQLTypeName.INT64).setMode(Field.Mode.REQUIRED).build()
         );
         final Schema newSchema = Schema.of(
-                Field.of("string", StandardSQLTypeName.STRING),
-                Field.of("int", StandardSQLTypeName.INT64)
-                );
+                Field.newBuilder("string", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build(),
+                Field.newBuilder("int", StandardSQLTypeName.INT64).setMode(Field.Mode.REQUIRED).build(),
+                Field.newBuilder("new_nested", StandardSQLTypeName.STRUCT,
+                        Field.newBuilder("nested_string", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build()
+                ).setMode(Field.Mode.REQUIRED).build()
+        );
         final Schema evolvedSchema = schemaEvolver.evolveSchema(baseSchema, newSchema);
         assertEquals(Schema.of(
-                Field.of("string", StandardSQLTypeName.STRING),
-                Field.of("int", StandardSQLTypeName.INT64),
-                Field.newBuilder("old_string", StandardSQLTypeName.STRING).setMode(Field.Mode.NULLABLE).build()
+                Field.newBuilder("string", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build(),
+                Field.newBuilder("int", StandardSQLTypeName.INT64).setMode(Field.Mode.REQUIRED).build(),
+                Field.newBuilder("new_nested", StandardSQLTypeName.STRUCT,
+                        Field.newBuilder("nested_string", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build()
+                ).setMode(Field.Mode.NULLABLE).build()
         ), evolvedSchema);
+    }
+
+    @Test
+    public void testAddNewNestedSchemaField() {
+        final Schema baseSchema = Schema.of(
+                Field.newBuilder("string", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build(),
+                Field.newBuilder("int", StandardSQLTypeName.INT64).setMode(Field.Mode.REQUIRED).build(),
+                Field.newBuilder("nested", StandardSQLTypeName.STRUCT,
+                        Field.newBuilder("nested_string", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build()
+                ).setMode(Field.Mode.REQUIRED).build()
+        );
+        final Schema newSchema = Schema.of(
+                Field.newBuilder("string", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build(),
+                Field.newBuilder("int", StandardSQLTypeName.INT64).setMode(Field.Mode.REQUIRED).build(),
+                Field.newBuilder("nested", StandardSQLTypeName.STRUCT,
+                        Field.newBuilder("nested_string", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build(),
+                        Field.newBuilder("new_nested_int", StandardSQLTypeName.INT64).setMode(Field.Mode.REQUIRED).build()
+                ).setMode(Field.Mode.REQUIRED).build()
+        );
+        final Schema evolvedSchema = schemaEvolver.evolveSchema(baseSchema, newSchema);
+        assertEquals(evolvedSchema, Schema.of(
+                Field.newBuilder("string", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build(),
+                Field.newBuilder("int", StandardSQLTypeName.INT64).setMode(Field.Mode.REQUIRED).build(),
+                Field.newBuilder("nested", StandardSQLTypeName.STRUCT,
+                        Field.newBuilder("nested_string", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build(),
+                        Field.newBuilder("new_nested_int", StandardSQLTypeName.INT64).setMode(Field.Mode.NULLABLE).build()
+                ).setMode(Field.Mode.REQUIRED).build()
+        ));
+    }
+
+    @Test
+    public void testRemoveSchemaField() {
+        final Schema baseSchema = Schema.of(
+                Field.newBuilder("string", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build(),
+                Field.newBuilder("int", StandardSQLTypeName.INT64).setMode(Field.Mode.REQUIRED).build(),
+                Field.newBuilder("old_string", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build()
+        );
+        final Schema newSchema = Schema.of(
+                Field.newBuilder("string", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build(),
+                Field.newBuilder("int", StandardSQLTypeName.INT64).setMode(Field.Mode.REQUIRED).build()
+                );
+        final Schema evolvedSchema = schemaEvolver.evolveSchema(baseSchema, newSchema);
+        assertEquals(evolvedSchema, Schema.of(
+                Field.newBuilder("string", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build(),
+                Field.newBuilder("int", StandardSQLTypeName.INT64).setMode(Field.Mode.REQUIRED).build(),
+                Field.newBuilder("old_string", StandardSQLTypeName.STRING).setMode(Field.Mode.NULLABLE).build()
+        ));
+    }
+
+    @Test
+    public void testRemoveMiddleSchemaField() {
+        final Schema baseSchema = Schema.of(
+                Field.newBuilder("string", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build(),
+                Field.newBuilder("int", StandardSQLTypeName.INT64).setMode(Field.Mode.REQUIRED).build(),
+                Field.newBuilder("old_string", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build()
+        );
+        final Schema newSchema = Schema.of(
+                Field.newBuilder("string", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build(),
+                Field.newBuilder("old_string", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build()
+        );
+        final Schema evolvedSchema = schemaEvolver.evolveSchema(baseSchema, newSchema);
+        assertEquals(evolvedSchema, Schema.of(
+                Field.newBuilder("string", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build(),
+                Field.newBuilder("int", StandardSQLTypeName.INT64).setMode(Field.Mode.NULLABLE).build(),
+                Field.newBuilder("old_string", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build()
+        ));
+    }
+
+    @Test
+    public void testRemoveSchemaFieldWithRequiredNestedStructure() {
+        final Schema baseSchema = Schema.of(
+                Field.newBuilder("string", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build(),
+                Field.newBuilder("int", StandardSQLTypeName.INT64).setMode(Field.Mode.REQUIRED).build(),
+                Field.newBuilder("nested", StandardSQLTypeName.STRUCT,
+                        Field.newBuilder("nested_string", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build(),
+                        Field.newBuilder("nested_int", StandardSQLTypeName.INT64).setMode(Field.Mode.REQUIRED).build()
+                ).setMode(Field.Mode.REQUIRED).build()
+        );
+        final Schema newSchema = Schema.of(
+                Field.newBuilder("string", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build(),
+                Field.newBuilder("int", StandardSQLTypeName.INT64).setMode(Field.Mode.REQUIRED).build()
+        );
+        final Schema evolvedSchema = schemaEvolver.evolveSchema(baseSchema, newSchema);
+        assertEquals(evolvedSchema, Schema.of(
+                Field.newBuilder("string", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build(),
+                Field.newBuilder("int", StandardSQLTypeName.INT64).setMode(Field.Mode.REQUIRED).build(),
+                Field.newBuilder("nested", StandardSQLTypeName.STRUCT,
+                        Field.newBuilder("nested_string", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build(),
+                        Field.newBuilder("nested_int", StandardSQLTypeName.INT64).setMode(Field.Mode.REQUIRED).build()
+                ).setMode(Field.Mode.NULLABLE).build()
+        ));
+    }
+
+    @Test
+    public void testRemoveNestedSchemaField() {
+        final Schema baseSchema = Schema.of(
+                Field.newBuilder("string", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build(),
+                Field.newBuilder("int", StandardSQLTypeName.INT64).setMode(Field.Mode.REQUIRED).build(),
+                Field.newBuilder("nested", StandardSQLTypeName.STRUCT,
+                        Field.newBuilder("nested_string", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build(),
+                        Field.newBuilder("nested_int", StandardSQLTypeName.INT64).setMode(Field.Mode.REQUIRED).build()
+                ).setMode(Field.Mode.REQUIRED).build()
+        );
+        final Schema newSchema = Schema.of(
+                Field.newBuilder("string", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build(),
+                Field.newBuilder("int", StandardSQLTypeName.INT64).setMode(Field.Mode.REQUIRED).build(),
+                Field.newBuilder("nested", StandardSQLTypeName.STRUCT,
+                        Field.newBuilder("nested_int", StandardSQLTypeName.INT64).setMode(Field.Mode.REQUIRED).build()
+                ).setMode(Field.Mode.REQUIRED).build()
+        );
+        final Schema evolvedSchema = schemaEvolver.evolveSchema(baseSchema, newSchema);
+        assertEquals(evolvedSchema, Schema.of(
+                Field.newBuilder("string", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build(),
+                Field.newBuilder("int", StandardSQLTypeName.INT64).setMode(Field.Mode.REQUIRED).build(),
+                Field.newBuilder("nested", StandardSQLTypeName.STRUCT,
+                        Field.newBuilder("nested_string", StandardSQLTypeName.STRING).setMode(Field.Mode.NULLABLE).build(),
+                        Field.newBuilder("nested_int", StandardSQLTypeName.INT64).setMode(Field.Mode.REQUIRED).build()
+                ).setMode(Field.Mode.REQUIRED).build()
+        ));
     }
 
     @Test
@@ -146,8 +269,8 @@ public class SimpleBigquerySchemaEvolverTests {
         );
         final Schema newSchema = Schema.of(
                 Field.of("string", StandardSQLTypeName.STRING),
-                Field.of("int", StandardSQLTypeName.INT64),
-                Field.of("newInt", StandardSQLTypeName.INT64)
+                Field.of("newInt", StandardSQLTypeName.INT64),
+                Field.of("int", StandardSQLTypeName.INT64)
         );
         final Schema evolvedSchema = schemaEvolver.evolveSchema(baseSchema, newSchema);
         assertEquals(evolvedSchema, Schema.of(
@@ -157,4 +280,86 @@ public class SimpleBigquerySchemaEvolverTests {
         ));
     }
 
+    @Test
+    public void testSchemaFieldOrderingNotChangedOnAddNested() {
+        final Schema baseSchema = Schema.of(
+                Field.of("int", StandardSQLTypeName.INT64),
+                Field.of("nested", StandardSQLTypeName.STRUCT,
+                        Field.of("nested_int", StandardSQLTypeName.INT64),
+                        Field.of("nested_string", StandardSQLTypeName.STRING)
+                ),
+                Field.of("string", StandardSQLTypeName.STRING)
+        );
+        final Schema newSchema = Schema.of(
+                Field.of("string", StandardSQLTypeName.STRING),
+                Field.of("newInt", StandardSQLTypeName.INT64),
+                Field.of("nested", StandardSQLTypeName.STRUCT,
+                        Field.of("nested_int", StandardSQLTypeName.INT64),
+                        Field.of("new_nested_string", StandardSQLTypeName.STRING),
+                        Field.of("nested_string", StandardSQLTypeName.STRING)
+                ),
+                Field.of("int", StandardSQLTypeName.INT64)
+        );
+        final Schema evolvedSchema = schemaEvolver.evolveSchema(baseSchema, newSchema);
+        assertEquals(evolvedSchema, Schema.of(
+                Field.of("int", StandardSQLTypeName.INT64),
+                Field.of("nested", StandardSQLTypeName.STRUCT,
+                        Field.of("nested_int", StandardSQLTypeName.INT64),
+                        Field.of("nested_string", StandardSQLTypeName.STRING),
+                        Field.newBuilder("new_nested_string", StandardSQLTypeName.STRING).setMode(Field.Mode.NULLABLE).build()
+                ),
+                Field.of("string", StandardSQLTypeName.STRING),
+                Field.newBuilder("newInt", StandardSQLTypeName.INT64).setMode(Field.Mode.NULLABLE).build()
+        ));
+    }
+
+    @Test
+    public void testSchemaFieldOrderingNotChangedOnRemove() {
+        final Schema baseSchema = Schema.of(
+                Field.newBuilder("int", StandardSQLTypeName.INT64).setMode(Field.Mode.REQUIRED).build(),
+                Field.newBuilder("old_string", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build(),
+                Field.newBuilder("string", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build()
+        );
+        final Schema newSchema = Schema.of(
+                Field.newBuilder("string", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build(),
+                Field.newBuilder("int", StandardSQLTypeName.INT64).setMode(Field.Mode.REQUIRED).build()
+        );
+        final Schema evolvedSchema = schemaEvolver.evolveSchema(baseSchema, newSchema);
+        assertEquals(evolvedSchema, Schema.of(
+                Field.newBuilder("int", StandardSQLTypeName.INT64).setMode(Field.Mode.REQUIRED).build(),
+                Field.newBuilder("old_string", StandardSQLTypeName.STRING).setMode(Field.Mode.NULLABLE).build(),
+                Field.newBuilder("string", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build()
+        ));
+    }
+
+    @Test
+    public void testSchemaFieldOrderingNotChangedOnRemoveNested() {
+        final Schema baseSchema = Schema.of(
+                Field.newBuilder("int", StandardSQLTypeName.INT64).setMode(Field.Mode.REQUIRED).build(),
+                Field.newBuilder("nested", StandardSQLTypeName.STRUCT,
+                        Field.newBuilder("nested_string", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build(),
+                        Field.newBuilder("nested_int", StandardSQLTypeName.INT64).setMode(Field.Mode.REQUIRED).build(),
+                        Field.newBuilder("old_nested_string", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build()
+                ).setMode(Field.Mode.REQUIRED).build(),
+                Field.newBuilder("string", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build()
+        );
+        final Schema newSchema = Schema.of(
+                Field.newBuilder("nested", StandardSQLTypeName.STRUCT,
+                        Field.newBuilder("nested_int", StandardSQLTypeName.INT64).setMode(Field.Mode.REQUIRED).build(),
+                        Field.newBuilder("nested_string", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build()
+                ).setMode(Field.Mode.REQUIRED).build(),
+                Field.newBuilder("string", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build(),
+                Field.newBuilder("int", StandardSQLTypeName.INT64).setMode(Field.Mode.REQUIRED).build()
+        );
+        final Schema evolvedSchema = schemaEvolver.evolveSchema(baseSchema, newSchema);
+        assertEquals(evolvedSchema, Schema.of(
+                Field.newBuilder("int", StandardSQLTypeName.INT64).setMode(Field.Mode.REQUIRED).build(),
+                Field.newBuilder("nested", StandardSQLTypeName.STRUCT,
+                        Field.newBuilder("nested_string", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build(),
+                        Field.newBuilder("nested_int", StandardSQLTypeName.INT64).setMode(Field.Mode.REQUIRED).build(),
+                        Field.newBuilder("old_nested_string", StandardSQLTypeName.STRING).setMode(Field.Mode.NULLABLE).build()
+                ).setMode(Field.Mode.REQUIRED).build(),
+                Field.newBuilder("string", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build()
+        ));
+    }
 }

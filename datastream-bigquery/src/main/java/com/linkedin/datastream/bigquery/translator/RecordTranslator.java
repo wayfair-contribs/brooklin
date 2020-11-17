@@ -159,7 +159,7 @@ public class RecordTranslator {
                     result = new AbstractMap.SimpleEntry<>(name, LogicalTypeTranslator.translateTimeType((Integer) record, avroSchema));
                     break;
                 }
-                break;
+                //We intentionally dont want to break in this case
             case LONG:
                 if (LogicalTypeIdentifier.isTimeType(avroSchema)) {
                     result = new AbstractMap.SimpleEntry<>(name, LogicalTypeTranslator.translateTimeType((Long) record, avroSchema));
@@ -170,7 +170,7 @@ public class RecordTranslator {
                 } else {
                     result = new AbstractMap.SimpleEntry<>(name, record);
                 }
-                // We intentionally dont want to break
+                break;
             case BOOLEAN:
                 result = new AbstractMap.SimpleEntry<>(name, record);
                 break;

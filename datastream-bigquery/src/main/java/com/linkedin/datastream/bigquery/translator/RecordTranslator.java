@@ -170,7 +170,7 @@ public class RecordTranslator {
                 } else {
                     result = new AbstractMap.SimpleEntry<>(name, record);
                 }
-                break;
+                // We intentionally dont want to break
             case BOOLEAN:
                 result = new AbstractMap.SimpleEntry<>(name, record);
                 break;

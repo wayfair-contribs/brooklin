@@ -6,6 +6,7 @@
 package com.linkedin.datastream.bigquery;
 
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -39,7 +40,8 @@ public class BigqueryTransportProvider extends AbstractBufferedTransportProvider
                         builder._committer,
                         builder._batchBuilderQueueSize,
                         builder._translatorProperties,
-                        builder.schemaEvolver)).collect(Collectors.toList()),
+                        builder.schemaEvolvers,
+                        builder.defaultSchemaEvolverName)).collect(Collectors.toList()),
                 builder._maxBatchAge);
     }
 
@@ -85,7 +87,8 @@ public class BigqueryTransportProvider extends AbstractBufferedTransportProvider
         private int _maxInflightBatchCommits;
         private BigqueryBatchCommitter _committer;
         private VerifiableProperties _translatorProperties;
-        private BigquerySchemaEvolver schemaEvolver;
+        private Map<String, BigquerySchemaEvolver> schemaEvolvers;
+        private String defaultSchemaEvolverName;
 
         /**
          * Set the name of the transport provider
@@ -152,12 +155,22 @@ public class BigqueryTransportProvider extends AbstractBufferedTransportProvider
         }
 
         /**
-         * Set the Bigquery Schema Evolver
-         * @param schemaEvolver the BigquerySchemaEvolver
+         * Set the Bigquery Schema Evolvers map
+         * @param schemaEvolvers a map of schema evolver name to BigquerySchemaEvolver
          * @return the Builder
          */
-        public BigqueryTransportProviderBuilder setBigquerySchemaEvolver(final BigquerySchemaEvolver schemaEvolver) {
-            this.schemaEvolver = schemaEvolver;
+        public BigqueryTransportProviderBuilder setBigquerySchemaEvolvers(final Map<String, BigquerySchemaEvolver> schemaEvolvers) {
+            this.schemaEvolvers = schemaEvolvers;
+            return this;
+        }
+
+        /**
+         * Set the default BigQuery schema evolver name
+         * @param schemaEvolverName the name
+         * @return the Builder
+         */
+        public BigqueryTransportProviderBuilder setDefaultBigquerySchemaEvolverName(final String schemaEvolverName) {
+            this.defaultSchemaEvolverName = schemaEvolverName;
             return this;
         }
 

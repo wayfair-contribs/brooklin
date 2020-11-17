@@ -6,6 +6,7 @@
 package com.linkedin.datastream.bigquery;
 
 import java.time.Duration;
+import java.util.Map;
 import java.util.Properties;
 
 import org.slf4j.Logger;
@@ -41,7 +42,7 @@ public class BigqueryTransportProviderAdmin implements TransportProviderAdmin {
     private static final String CONFIG_TRANSLATOR_DOMAIN_PREFIX = "translator";
 
     protected static final String CONFIG_COMMITTER_DOMAIN_PREFIX = "committer";
-    protected static final String CONFIG_SCHEMA_EVOLVER_DOMAIN_PREFIX = "schemaEvolver";
+    protected static final String CONFIG_SCHEMA_EVOLVERS_DOMAIN_PREFIX = "schemaEvolvers";
 
     private final BigqueryTransportProvider _transportProvider;
 
@@ -55,8 +56,8 @@ public class BigqueryTransportProviderAdmin implements TransportProviderAdmin {
         VerifiableProperties committerProperties = new VerifiableProperties(tpProperties.getDomainProperties(
                 CONFIG_COMMITTER_DOMAIN_PREFIX, false));
 
-        final BigquerySchemaEvolver schemaEvolver = BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(
-                new VerifiableProperties(tpProperties.getDomainProperties(CONFIG_SCHEMA_EVOLVER_DOMAIN_PREFIX, false)));
+        final VerifiableProperties schemaEvolversProperties = new VerifiableProperties(tpProperties.getDomainProperties(CONFIG_SCHEMA_EVOLVERS_DOMAIN_PREFIX));
+        final Map<String, BigquerySchemaEvolver> bigquerySchemaEvolverMap = BigquerySchemaEvolverFactory.createBigquerySchemaEvolvers(schemaEvolversProperties);
 
         _transportProvider = new BigqueryTransportProvider.BigqueryTransportProviderBuilder()
                 .setTransportProviderName(transportProviderName)
@@ -67,7 +68,8 @@ public class BigqueryTransportProviderAdmin implements TransportProviderAdmin {
                 .setMaxInflightBatchCommits(tpProperties.getInt(CONFIG_MAX_INFLIGHT_COMMITS, 1))
                 .setCommitter(new BigqueryBatchCommitter(committerProperties))
                 .setTranslatorProperties(new VerifiableProperties(tpProperties.getDomainProperties(CONFIG_TRANSLATOR_DOMAIN_PREFIX)))
-                .setBigquerySchemaEvolver(schemaEvolver)
+                .setBigquerySchemaEvolvers(bigquerySchemaEvolverMap)
+                .setDefaultBigquerySchemaEvolverName(schemaEvolversProperties.getString("default"))
                 .build();
     }
 

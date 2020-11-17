@@ -5,6 +5,7 @@
  */
 package com.linkedin.datastream.bigquery;
 
+import java.util.HashMap;
 import java.util.Map;
 
 import org.slf4j.Logger;
@@ -31,7 +32,8 @@ public class BatchBuilder extends AbstractBatchBuilder {
     private final int _maxInflightCommits;
     private final BigqueryBatchCommitter _committer;
     private final SchemaRegistry _schemaRegistry;
-    private final BigquerySchemaEvolver _schemaEvolver;
+    private final Map<String, BigquerySchemaEvolver> _schemaEvolvers;
+    private final String _defaultBigquerySchemaEvolverName;
 
     /**
      * Constructor for BatchBuilder
@@ -41,6 +43,8 @@ public class BatchBuilder extends AbstractBatchBuilder {
      * @param committer committer object.
      * @param queueSize queue size of the batch builder.
      * @param translatorProperties configuration options for translator.
+     * @param schemaEvolvers a mapping of schema evolver name to BigquerySchemaEvolver
+     * @param defaultBigquerySchemaEvolverName the name of the default BigquerySchemaEvolver
      */
     public BatchBuilder(int maxBatchSize,
                         int maxBatchAge,
@@ -48,7 +52,8 @@ public class BatchBuilder extends AbstractBatchBuilder {
                         BigqueryBatchCommitter committer,
                         int queueSize,
                         VerifiableProperties translatorProperties,
-                        BigquerySchemaEvolver schemaEvolver) {
+                        Map<String, BigquerySchemaEvolver> schemaEvolvers,
+                        String defaultBigquerySchemaEvolverName) {
         this(
                 maxBatchSize,
                 maxBatchAge,
@@ -56,7 +61,8 @@ public class BatchBuilder extends AbstractBatchBuilder {
                 committer,
                 queueSize,
                 new SchemaRegistry(new VerifiableProperties(translatorProperties.getDomainProperties(CONFIG_SCHEMA_REGISTRY))),
-                schemaEvolver
+                schemaEvolvers,
+                defaultBigquerySchemaEvolverName
         );
     }
 
@@ -66,14 +72,16 @@ public class BatchBuilder extends AbstractBatchBuilder {
                  final BigqueryBatchCommitter committer,
                  final int queueSize,
                  final SchemaRegistry schemaRegistry,
-                 final BigquerySchemaEvolver schemaEvolver) {
+                 final Map<String, BigquerySchemaEvolver> schemaEvolvers,
+                 final String defaultBigquerySchemaEvolverName) {
         super(queueSize);
         _maxBatchSize = maxBatchSize;
         _maxBatchAge = maxBatchAge;
         _maxInflightCommits = maxInflightCommits;
         _committer = committer;
         _schemaRegistry = schemaRegistry;
-        _schemaEvolver = schemaEvolver;
+        _schemaEvolvers = new HashMap<>(schemaEvolvers);
+        _defaultBigquerySchemaEvolverName = defaultBigquerySchemaEvolverName;
     }
 
     @Override
@@ -96,7 +104,7 @@ public class BatchBuilder extends AbstractBatchBuilder {
                                     _maxInflightCommits,
                                     _schemaRegistry,
                                     _committer,
-                                    _schemaEvolver)).write(aPackage);
+                                    _schemaEvolvers.get(_defaultBigquerySchemaEvolverName))).write(aPackage);
                 } else {
                     // broadcast signal
                     for (Map.Entry<String, AbstractBatch> entry : _registry.entrySet()) {

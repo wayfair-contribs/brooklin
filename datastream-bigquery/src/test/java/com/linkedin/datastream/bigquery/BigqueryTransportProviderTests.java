@@ -37,7 +37,9 @@ import java.io.IOException;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
@@ -76,9 +78,9 @@ public class BigqueryTransportProviderTests {
                 .collect(Collectors.toList());
 
         final BigqueryBatchCommitter committer = new BigqueryBatchCommitter(bigQuery, 1);
-
         final BatchBuilder batchBuilder = new BatchBuilder(
-                maxBatchSize, maxBatchAge, maxInflightCommits, committer, queueSize, schemaRegistry, schemaEvolver
+                maxBatchSize, maxBatchAge, maxInflightCommits, committer, queueSize, schemaRegistry, schemaEvolvers,
+                defaultSchemaEvolverName
         );
         final List<BatchBuilder> batchBuilders = ImmutableList.of(batchBuilder);
 
@@ -160,7 +162,7 @@ public class BigqueryTransportProviderTests {
         final BigqueryBatchCommitter committer = new BigqueryBatchCommitter(bigQuery, 1);
 
         final BatchBuilder batchBuilder = new BatchBuilder(
-                maxBatchSize, maxBatchAge, maxInflightCommits, committer, queueSize, schemaRegistry, schemaEvolver
+                maxBatchSize, maxBatchAge, maxInflightCommits, committer, queueSize, schemaRegistry, schemaEvolvers, defaultSchemaEvolverName
         );
         final List<BatchBuilder> batchBuilders = ImmutableList.of(batchBuilder);
 
@@ -188,7 +190,7 @@ public class BigqueryTransportProviderTests {
         final Table.Builder tableBuilder = mock(Table.Builder.class);
         when(mockedTable.toBuilder()).thenReturn(tableBuilder);
         final TableDefinition evolvedTableDefinition = StandardTableDefinition.newBuilder()
-                .setSchema(schemaEvolver.evolveSchema(firstSchema, SchemaTranslator.translate(schema2)))
+                .setSchema(schemaEvolvers.get(defaultSchemaEvolverName).evolveSchema(firstSchema, SchemaTranslator.translate(schema2)))
                 .setTimePartitioning(TimePartitioning.of(TimePartitioning.Type.DAY))
                 .build();
         when(tableBuilder.setDefinition(evolvedTableDefinition)).thenReturn(tableBuilder);
@@ -244,7 +246,8 @@ public class BigqueryTransportProviderTests {
     private SchemaRegistry schemaRegistry;
     private KafkaAvroSerializer serializer;
     private BigQuery bigQuery;
-    private BigquerySchemaEvolver schemaEvolver;
+    private Map<String, BigquerySchemaEvolver> schemaEvolvers;
+    private String defaultSchemaEvolverName;
 
     @BeforeMethod
     void beforeTest() {
@@ -252,7 +255,8 @@ public class BigqueryTransportProviderTests {
         schemaRegistry = new SchemaRegistry("http://schema-registry/", schemaRegistryClient, schemaNameSuffix);
         serializer = new KafkaAvroSerializer(schemaRegistryClient);
         bigQuery = mock(BigQuery.class);
-        schemaEvolver = new SimpleBigquerySchemaEvolver();
+        defaultSchemaEvolverName = "simple";
+        schemaEvolvers = Collections.singletonMap(defaultSchemaEvolverName, new SimpleBigquerySchemaEvolver());
     }
 
     private void sendEvents(final BigqueryTransportProvider transportProvider, final String destination, final String topicName, final int partition, final List<GenericRecord> events) {

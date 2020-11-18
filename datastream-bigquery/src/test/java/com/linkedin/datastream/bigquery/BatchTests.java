@@ -12,6 +12,7 @@ import com.linkedin.datastream.bigquery.translator.SchemaTranslator;
 import com.linkedin.datastream.common.Package;
 import com.linkedin.datastream.common.Record;
 import com.linkedin.datastream.metrics.DynamicMetricsManager;
+import com.linkedin.datastream.serde.Deserializer;
 import io.confluent.kafka.schemaregistry.client.MockSchemaRegistryClient;
 import io.confluent.kafka.schemaregistry.client.rest.exceptions.RestClientException;
 import io.confluent.kafka.serializers.KafkaAvroDeserializer;
@@ -37,22 +38,19 @@ public class BatchTests {
     }
 
     private MockSchemaRegistryClient schemaRegistryClient;
-    private KafkaAvroDeserializer deserializer;
     private KafkaAvroSerializer serializer;
     private BigqueryBatchCommitter committer;
-    private SchemaRegistry schemaRegistry;
     private BigquerySchemaEvolver schemaEvolver;
     private Batch batch;
 
     @BeforeMethod
     void beforeTest() {
         schemaRegistryClient = new MockSchemaRegistryClient();
-        deserializer = new KafkaAvroDeserializer(schemaRegistryClient);
+        final Deserializer deserializer = new KafkaDeserializer(new KafkaAvroDeserializer(schemaRegistryClient));
         serializer = new KafkaAvroSerializer(schemaRegistryClient);
         committer = mock(BigqueryBatchCommitter.class);
-        schemaRegistry = new SchemaRegistry("http://schema-registry", schemaRegistryClient, "-value");
         schemaEvolver = new SimpleBigquerySchemaEvolver();
-        batch = new Batch(10, 10000, 1, schemaRegistry, committer, schemaEvolver);
+        batch = new Batch(10, 10000, 1, deserializer, committer, schemaEvolver);
     }
 
     @Test

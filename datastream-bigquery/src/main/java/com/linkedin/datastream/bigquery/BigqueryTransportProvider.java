@@ -5,17 +5,34 @@
  */
 package com.linkedin.datastream.bigquery;
 
+import java.nio.ByteBuffer;
+import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 
+import org.apache.avro.Schema;
+import org.apache.avro.SchemaBuilder;
+import org.apache.avro.generic.GenericData;
+import org.apache.avro.generic.GenericRecordBuilder;
+import org.apache.commons.lang3.exception.ExceptionUtils;
+import org.apache.kafka.common.errors.SerializationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolver;
-import com.linkedin.datastream.common.VerifiableProperties;
+import com.linkedin.datastream.bigquery.schema.IncompatibleSchemaEvolutionException;
+import com.linkedin.datastream.bigquery.translator.SchemaTranslationException;
+import com.linkedin.datastream.common.BrooklinEnvelope;
+import com.linkedin.datastream.common.BrooklinEnvelopeMetadataConstants;
+import com.linkedin.datastream.common.DatastreamTransientException;
+import com.linkedin.datastream.common.SendCallback;
+import com.linkedin.datastream.serde.Deserializer;
+import com.linkedin.datastream.server.DatastreamProducerRecord;
+import com.linkedin.datastream.server.DatastreamProducerRecordBuilder;
+
+
 import com.linkedin.datastream.server.api.transport.buffered.AbstractBatchBuilder;
 import com.linkedin.datastream.server.api.transport.buffered.AbstractBufferedTransportProvider;
 
@@ -26,29 +43,36 @@ public class BigqueryTransportProvider extends AbstractBufferedTransportProvider
 
     private static final Logger LOG = LoggerFactory.getLogger(BigqueryTransportProvider.class.getName());
 
+    static final Schema EXCEPTION_TYPE_SCHEMA = Schema.createEnum("exceptionType", null,
+            "com.linkedin.datastream.bigquery",
+            Arrays.stream(BigqueryExceptionType.values()).map(BigqueryExceptionType::name).collect(Collectors.toList()));
+
+    static final Schema EXCEPTION_RECORD_SCHEMA = SchemaBuilder.builder("com.linkedin.datastream.bigquery")
+            .record("ExceptionRecord").fields()
+            .requiredString("kafkaCluster")
+            .requiredString("kafkaTopic")
+            .requiredString("kafkaPartition")
+            .requiredString("kafkaOffset")
+            .requiredString("kafkaEventTimestamp")
+            .name("exceptionType").type(EXCEPTION_TYPE_SCHEMA).noDefault()
+            .requiredString("exceptionClass")
+            .requiredString("exceptionMessage")
+            .requiredString("exceptionStackTrace")
+            .requiredBytes("eventValueBytes")
+            .optionalString("eventValueString")
+            .endRecord();
+
     private final BigqueryBatchCommitter _committer;
+    private final int _maxBatchAge;
+    private final Serializer _valueSerializer;
+    private final Deserializer _valueDeserializer;
 
-    private final int maxBatchAge;
-
-    private BigqueryTransportProvider(BigqueryTransportProviderBuilder builder) {
-        this(builder._transportProviderName, builder._committer,
-                IntStream.range(0, builder._batchBuilderCount)
-                    .mapToObj(i -> new BatchBuilder(
-                        builder._maxBatchSize,
-                        builder._maxBatchAge,
-                        builder._maxInflightBatchCommits,
-                        builder._committer,
-                        builder._batchBuilderQueueSize,
-                        builder._translatorProperties,
-                        builder.schemaEvolvers,
-                        builder.defaultSchemaEvolverName)).collect(Collectors.toList()),
-                builder._maxBatchAge);
-    }
-
-    BigqueryTransportProvider(final String name, final BigqueryBatchCommitter committer, final List<BatchBuilder> batchBuilders, final int maxBatchAge) {
-        super(name, batchBuilders);
-        _committer = committer;
-        this.maxBatchAge = maxBatchAge;
+    private BigqueryTransportProvider(final BigqueryTransportProviderBuilder builder) {
+        super(builder._transportProviderName, builder._batchBuilders);
+        _committer = builder._committer;
+        _maxBatchAge = builder._maxBatchAge;
+        _valueSerializer = builder._valueSerializer;
+        _valueDeserializer = builder._valueDeserializer;
         init();
     }
 
@@ -65,9 +89,101 @@ public class BigqueryTransportProvider extends AbstractBufferedTransportProvider
                         objectBuilder.assign(new com.linkedin.datastream.common.Package.PackageBuilder().buildTryFlushSignalPackage());
                     }
                 },
-                maxBatchAge / 2,
-                maxBatchAge / 2,
+                _maxBatchAge / 2,
+                _maxBatchAge / 2,
                 TimeUnit.MILLISECONDS);
+    }
+
+    @Override
+    public void send(final String destination, final DatastreamProducerRecord record, final SendCallback onComplete) {
+        super.send(destination, record, ((metadata, exception) -> {
+            if (exception == null) {
+                onComplete.onCompletion(metadata, null);
+            } else if (exception instanceof DatastreamTransientException) {
+                onComplete.onCompletion(metadata, exception);
+            } else {
+                final DatastreamProducerRecord exceptionRecord;
+                try {
+                    exceptionRecord = createExceptionRecord(record, exception);
+                } catch (final Exception e) {
+                    LOG.error("Unable to create BigQuery exception record", e);
+                    onComplete.onCompletion(metadata, e);
+                    return;
+                }
+                // Send an exception record
+                super.send(destination, exceptionRecord, (exceptionRecordMetadata, exceptionRecordException) ->
+                        onComplete.onCompletion(metadata, exceptionRecordException));
+            }
+        }));
+    }
+
+    private DatastreamProducerRecord createExceptionRecord(final DatastreamProducerRecord record, final Exception exception) {
+        final DatastreamProducerRecordBuilder exceptionRecordBuilder = new DatastreamProducerRecordBuilder();
+        exceptionRecordBuilder.setSourceCheckpoint(record.getCheckpoint());
+        exceptionRecordBuilder.setEventsSourceTimestamp(record.getEventsSourceTimestamp());
+        record.getPartition().ifPresent(exceptionRecordBuilder::setPartition);
+        record.getPartitionKey().ifPresent(exceptionRecordBuilder::setPartitionKey);
+        record.getDestination().ifPresent(exceptionRecordBuilder::setDestination);
+
+        final BigqueryExceptionType exceptionType = classifyException(exception);
+        final String exceptionClassName = exception.getClass().getName();
+        final String exceptionMessage = exception.getMessage();
+        final String exceptionStackTrace = ExceptionUtils.getStackTrace(exception);
+        record.getEventsSendTimestamp().ifPresent(exceptionRecordBuilder::setEventsSendTimestamp);
+        record.getEvents().stream().map(event -> {
+            final String cluster = event.getMetadata().get(KAFKA_ORIGIN_CLUSTER);
+            final String topic = event.getMetadata().get(KAFKA_ORIGIN_TOPIC);
+            final String partition = event.getMetadata().get(KAFKA_ORIGIN_PARTITION);
+            final String offset = event.getMetadata().get(KAFKA_ORIGIN_OFFSET);
+            final String eventTimestamp = event.getMetadata().get(BrooklinEnvelopeMetadataConstants.EVENT_TIMESTAMP);
+            final GenericRecordBuilder exceptionAvroRecordBuilder = new GenericRecordBuilder(EXCEPTION_RECORD_SCHEMA)
+                    .set("kafkaCluster", cluster)
+                    .set("kafkaTopic", topic)
+                    .set("kafkaPartition", partition)
+                    .set("kafkaOffset", offset)
+                    .set("kafkaEventTimestamp", eventTimestamp)
+                    .set("exceptionType", new GenericData.EnumSymbol(EXCEPTION_TYPE_SCHEMA, exceptionType.name()))
+                    .set("exceptionClass", exceptionClassName)
+                    .set("exceptionMessage", exceptionMessage)
+                    .set("exceptionStackTrace", exceptionStackTrace);
+            if (event.value().isPresent()) {
+                final byte[] valueBytes = (byte[]) event.value().get();
+                exceptionAvroRecordBuilder.set("eventValueBytes", ByteBuffer.wrap(valueBytes));
+                try {
+                    final Object value = _valueDeserializer.deserialize(valueBytes);
+                    exceptionAvroRecordBuilder.set("eventValueString", value.toString());
+                } catch (final Exception e) {
+                    LOG.warn("Unable to deserialize event value", e);
+                }
+            } else {
+                exceptionAvroRecordBuilder.set("eventValueBytes", ByteBuffer.wrap(new byte[0]));
+            }
+            final byte[] exceptionRecordBytes = _valueSerializer.serialize("brooklin-bigquery-transport-exceptions", exceptionAvroRecordBuilder.build());
+            final Map<String, String> exceptionRecordMetadata = new HashMap<>(5);
+            exceptionRecordMetadata.put(KAFKA_ORIGIN_CLUSTER, cluster);
+            exceptionRecordMetadata.put(KAFKA_ORIGIN_TOPIC, topic + "_exceptions");
+            exceptionRecordMetadata.put(KAFKA_ORIGIN_PARTITION, partition);
+            exceptionRecordMetadata.put(KAFKA_ORIGIN_OFFSET, offset);
+            exceptionRecordMetadata.put(BrooklinEnvelopeMetadataConstants.EVENT_TIMESTAMP, eventTimestamp);
+            return new BrooklinEnvelope(new byte[0], exceptionRecordBytes, exceptionRecordMetadata);
+        }).forEachOrdered(exceptionRecordBuilder::addEvent);
+        return exceptionRecordBuilder.build();
+    }
+
+    private static BigqueryExceptionType classifyException(final Exception e) {
+        final BigqueryExceptionType exceptionType;
+        if (e instanceof IncompatibleSchemaEvolutionException) {
+            exceptionType = BigqueryExceptionType.SchemaEvolution;
+        } else if (e instanceof TransientStreamingInsertException) {
+            exceptionType = BigqueryExceptionType.InsertError;
+        } else if (e instanceof SerializationException) {
+            exceptionType = BigqueryExceptionType.Deserialization;
+        } else if (e instanceof SchemaTranslationException) {
+            exceptionType = BigqueryExceptionType.SchemaTranslation;
+        } else {
+            exceptionType = BigqueryExceptionType.Other;
+        }
+        return exceptionType;
     }
 
     @Override
@@ -80,45 +196,17 @@ public class BigqueryTransportProvider extends AbstractBufferedTransportProvider
      */
     public static class BigqueryTransportProviderBuilder {
         private String _transportProviderName;
-        private int _batchBuilderQueueSize;
-        private int _batchBuilderCount;
-        private int _maxBatchSize;
         private int _maxBatchAge;
-        private int _maxInflightBatchCommits;
         private BigqueryBatchCommitter _committer;
-        private VerifiableProperties _translatorProperties;
-        private Map<String, BigquerySchemaEvolver> schemaEvolvers;
-        private String defaultSchemaEvolverName;
+        private List<BatchBuilder> _batchBuilders;
+        private Serializer _valueSerializer;
+        private Deserializer _valueDeserializer;
 
         /**
          * Set the name of the transport provider
          */
         public BigqueryTransportProviderBuilder setTransportProviderName(String transportProviderName) {
             this._transportProviderName = transportProviderName;
-            return this;
-        }
-
-        /**
-         * Set batch builder's queue size
-         */
-        public BigqueryTransportProviderBuilder setBatchBuilderQueueSize(int batchBuilderQueueSize) {
-            this._batchBuilderQueueSize = batchBuilderQueueSize;
-            return this;
-        }
-
-        /**
-         * Set number of batch builders
-         */
-        public BigqueryTransportProviderBuilder setBatchBuilderCount(int batchBuilderCount) {
-            this._batchBuilderCount = batchBuilderCount;
-            return this;
-        }
-
-        /**
-         * Set max batch size
-         */
-        public BigqueryTransportProviderBuilder setMaxBatchSize(int maxBatchSize) {
-            this._maxBatchSize = maxBatchSize;
             return this;
         }
 
@@ -131,14 +219,6 @@ public class BigqueryTransportProvider extends AbstractBufferedTransportProvider
         }
 
         /**
-         * Set max inflight commits
-         */
-        public BigqueryTransportProviderBuilder setMaxInflightBatchCommits(int maxInflightBatchCommits) {
-            this._maxInflightBatchCommits = maxInflightBatchCommits;
-            return this;
-        }
-
-        /**
          * Set batch committer
          */
         public BigqueryTransportProviderBuilder setCommitter(BigqueryBatchCommitter committer) {
@@ -147,30 +227,32 @@ public class BigqueryTransportProvider extends AbstractBufferedTransportProvider
         }
 
         /**
-         * Set translator configuration options
+         * Set the batch builders
+         * @param batchBuilders a list of BatchBuilder objects
+         * @return the Builder
          */
-        public BigqueryTransportProviderBuilder setTranslatorProperties(VerifiableProperties translatorProperties) {
-            this._translatorProperties = translatorProperties;
+        public BigqueryTransportProviderBuilder setBatchBuilders(final List<BatchBuilder> batchBuilders) {
+            this._batchBuilders = batchBuilders;
             return this;
         }
 
         /**
-         * Set the Bigquery Schema Evolvers map
-         * @param schemaEvolvers a map of schema evolver name to BigquerySchemaEvolver
+         * Set the value serializer.
+         * @param valueSerializer the Serializer
          * @return the Builder
          */
-        public BigqueryTransportProviderBuilder setBigquerySchemaEvolvers(final Map<String, BigquerySchemaEvolver> schemaEvolvers) {
-            this.schemaEvolvers = schemaEvolvers;
+        public BigqueryTransportProviderBuilder setValueSerializer(final Serializer valueSerializer) {
+            this._valueSerializer = valueSerializer;
             return this;
         }
 
         /**
-         * Set the default BigQuery schema evolver name
-         * @param schemaEvolverName the name
+         * Set the value deserializer.
+         * @param valueDeserializer the Deserializer
          * @return the Builder
          */
-        public BigqueryTransportProviderBuilder setDefaultBigquerySchemaEvolverName(final String schemaEvolverName) {
-            this.defaultSchemaEvolverName = schemaEvolverName;
+        public BigqueryTransportProviderBuilder setValueDeserializer(final Deserializer valueDeserializer) {
+            this._valueDeserializer = valueDeserializer;
             return this;
         }
 

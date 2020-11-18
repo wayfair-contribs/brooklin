@@ -372,7 +372,7 @@ public class RecordTranslator {
     private static Map.Entry<String, Object> translateArrayTypeObject(Object record, Schema avroSchema, String name) {
         Map.Entry<String, Object> result;
         if (avroSchema.getElementType().getType() == Schema.Type.ARRAY) {
-            throw new IllegalArgumentException("Array of array types are not supported.");
+            throw new SchemaTranslationException("Array of array types are not supported.");
         }
 
         if (avroSchema.getElementType().getType() == Schema.Type.RECORD) {
@@ -423,7 +423,7 @@ public class RecordTranslator {
         Schema avroSchema = record.getSchema();
 
         if (avroSchema.getType() != Schema.Type.RECORD) {
-            throw new IllegalArgumentException("Object is not a Avro Record type.");
+            throw new SchemaTranslationException("Object is not a Avro Record type.");
         }
 
         TableRow fields = new TableRow();
@@ -485,7 +485,7 @@ public class RecordTranslator {
      */
     public static InsertAllRequest.RowToInsert translate(final GenericRecord avroRecord, final TableRow metadata) {
         if (avroRecord.getSchema().getType() != org.apache.avro.Schema.Type.RECORD) {
-            throw new IllegalArgumentException("The root of the record's schema should be a RECORD type.");
+            throw new SchemaTranslationException("The root of the record's schema should be a RECORD type.");
         }
 
         TableRow row = translateRecord((GenericData.Record) avroRecord);

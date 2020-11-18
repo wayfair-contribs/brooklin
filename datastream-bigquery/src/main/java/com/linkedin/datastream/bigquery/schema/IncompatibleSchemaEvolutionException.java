@@ -5,10 +5,12 @@
  */
 package com.linkedin.datastream.bigquery.schema;
 
+import com.linkedin.datastream.common.DatastreamRuntimeException;
+
 /**
  * An exception indicating that a requested schema evolution was incompatible.
  */
-public class IncompatibleSchemaEvolutionException extends RuntimeException {
+public class IncompatibleSchemaEvolutionException extends DatastreamRuntimeException {
 
     private static final long serialVersionUID = -1;
 

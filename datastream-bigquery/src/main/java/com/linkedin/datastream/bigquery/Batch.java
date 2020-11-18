@@ -10,12 +10,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
+import com.linkedin.datastream.serde.Deserializer;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.kafka.common.errors.SerializationException;
 
 import com.google.cloud.bigquery.InsertAllRequest;
 import com.google.cloud.bigquery.Schema;
-import io.confluent.kafka.serializers.KafkaAvroDeserializer;
 
 import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolver;
 import com.linkedin.datastream.bigquery.translator.RecordTranslator;
@@ -39,9 +39,8 @@ public class Batch extends AbstractBatch {
 
     private org.apache.avro.Schema _avroSchema;
     private Schema _schema;
-    private SchemaRegistry _schemaRegistry;
     private String _destination;
-    private KafkaAvroDeserializer _deserializer;
+    private final Deserializer _valueDeserializer;
     private final BigquerySchemaEvolver _schemaEvolver;
 
     /**
@@ -49,13 +48,13 @@ public class Batch extends AbstractBatch {
      * @param maxBatchSize any batch bigger than this threshold will be committed to BQ.
      * @param maxBatchAge any batch older than this threshold will be committed to BQ.
      * @param maxInflightWriteLogCommits maximum allowed batches in the commit backlog
-     * @param schemaRegistry schema registry client object
+     * @param valueDeserializer a Deserializer
      * @param committer committer object
      */
     public Batch(int maxBatchSize,
                  int maxBatchAge,
                  int maxInflightWriteLogCommits,
-                 SchemaRegistry schemaRegistry,
+                 Deserializer valueDeserializer,
                  BigqueryBatchCommitter committer,
                  BigquerySchemaEvolver schemaEvolver) {
         super(maxInflightWriteLogCommits);
@@ -66,8 +65,7 @@ public class Batch extends AbstractBatch {
         this._batchCreateTimeStamp = System.currentTimeMillis();
         this._schema = null;
         this._destination = null;
-        this._schemaRegistry = schemaRegistry;
-        this._deserializer = _schemaRegistry.getDeserializer();
+        this._valueDeserializer = valueDeserializer;
         this._schemaEvolver = schemaEvolver;
     }
 
@@ -112,14 +110,12 @@ public class Batch extends AbstractBatch {
                 _committer.setDestTableSchemaEvolver(_destination, _schemaEvolver);
             }
 
-            GenericRecord record;
+            final GenericRecord record;
             try {
-                record = (GenericRecord) _deserializer.deserialize(
-                        aPackage.getTopic(),
-                        (byte[]) aPackage.getRecord().getValue());
+                record = (GenericRecord) _valueDeserializer.deserialize((byte[]) aPackage.getRecord().getValue());
             } catch (SerializationException e) {
                 if (e.getCause() instanceof BufferUnderflowException) {
-                    LOG.warn("Skipping message at Topic {} - Partition {} - Offset {} - Reason {} - Exception {}",
+                    LOG.warn("Error deserializing message at Topic {} - Partition {} - Offset {} - Reason {} - Exception {}",
                             aPackage.getTopic(),
                             aPackage.getPartition(),
                             aPackage.getOffset(),
@@ -130,12 +126,8 @@ public class Batch extends AbstractBatch {
                             aPackage.getTopic(),
                             "deserializerErrorCount",
                             1);
-                    aPackage.getAckCallback().onCompletion(new DatastreamRecordMetadata(
-                            aPackage.getCheckpoint(), aPackage.getTopic(), aPackage.getPartition()), null);
-                    return;
-                } else {
-                    throw e;
                 }
+                throw e;
             }
 
             processAvroSchema(record.getSchema());

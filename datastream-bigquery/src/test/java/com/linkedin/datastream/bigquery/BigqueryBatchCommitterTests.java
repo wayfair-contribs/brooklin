@@ -181,8 +181,7 @@ public class BigqueryBatchCommitterTests {
         final ArgumentCaptor<Exception> exceptionArgumentCaptor = ArgumentCaptor.forClass(Exception.class);
         verify(sendCallback).onCompletion(eq(metadata), exceptionArgumentCaptor.capture());
         final Exception actualException = exceptionArgumentCaptor.getValue();
-        assertTrue(actualException instanceof DatastreamTransientException);
-        assertEquals(actualException.getCause(), exception);
+        assertEquals(actualException, exception);
     }
 
     @Test
@@ -339,8 +338,7 @@ public class BigqueryBatchCommitterTests {
         final ArgumentCaptor<Exception> exceptionArgumentCaptor = ArgumentCaptor.forClass(Exception.class);
         verify(sendCallback).onCompletion(eq(metadata), exceptionArgumentCaptor.capture());
         final Exception actualException = exceptionArgumentCaptor.getValue();
-        assertTrue(actualException instanceof DatastreamTransientException);
-        assertEquals(actualException.getCause(), exception);
+        assertEquals(actualException, exception);
     }
 
 

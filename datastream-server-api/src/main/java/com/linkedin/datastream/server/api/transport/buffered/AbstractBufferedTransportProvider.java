@@ -34,9 +34,10 @@ import com.linkedin.datastream.server.api.transport.TransportProvider;
 public abstract class AbstractBufferedTransportProvider implements TransportProvider {
     protected static final Logger LOG = LoggerFactory.getLogger(AbstractBufferedTransportProvider.class.getName());
 
-    protected static final String KAFKA_ORIGIN_TOPIC = "kafka-origin-topic";
-    protected static final String KAFKA_ORIGIN_PARTITION = "kafka-origin-partition";
-    protected static final String KAFKA_ORIGIN_OFFSET = "kafka-origin-offset";
+    public static final String KAFKA_ORIGIN_CLUSTER = "kafka-origin-cluster";
+    public static final String KAFKA_ORIGIN_TOPIC = "kafka-origin-topic";
+    public static final String KAFKA_ORIGIN_PARTITION = "kafka-origin-partition";
+    public static final String KAFKA_ORIGIN_OFFSET = "kafka-origin-offset";
 
     protected final String _transportProviderName;
     protected final ScheduledExecutorService _scheduler = new ScheduledThreadPoolExecutor(1);

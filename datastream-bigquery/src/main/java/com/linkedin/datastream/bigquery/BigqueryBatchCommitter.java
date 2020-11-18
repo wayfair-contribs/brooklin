@@ -5,9 +5,6 @@
  */
 package com.linkedin.datastream.bigquery;
 
-import java.io.FileInputStream;
-import java.io.FileNotFoundException;
-import java.io.IOException;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
@@ -29,7 +26,6 @@ import com.google.auth.Credentials;
 import com.google.auth.oauth2.GoogleCredentials;
 import com.google.cloud.bigquery.BigQuery;
 import com.google.cloud.bigquery.BigQueryException;
-import com.google.cloud.bigquery.BigQueryOptions;
 import com.google.cloud.bigquery.InsertAllRequest;
 import com.google.cloud.bigquery.InsertAllResponse;
 import com.google.cloud.bigquery.Schema;
@@ -42,9 +38,7 @@ import com.google.cloud.bigquery.TimePartitioning;
 
 import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolver;
 import com.linkedin.datastream.common.DatastreamRecordMetadata;
-import com.linkedin.datastream.common.DatastreamTransientException;
 import com.linkedin.datastream.common.SendCallback;
-import com.linkedin.datastream.common.VerifiableProperties;
 import com.linkedin.datastream.metrics.DynamicMetricsManager;
 import com.linkedin.datastream.server.api.transport.buffered.BatchCommitter;
 import com.linkedin.datastream.server.api.transport.buffered.CommitCallback;
@@ -58,8 +52,6 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
     private final ConcurrentMap<String, Schema> _destTableSchemas;
     private final ConcurrentMap<String, BigquerySchemaEvolver> _destTableSchemaEvolvers;
 
-    private static final String CONFIG_THREADS = "threads";
-
     private final ExecutorService _executor;
 
     private final BigQuery _bigquery;
@@ -72,35 +64,14 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
 
     /**
      * Constructor.
-     * @param properties the VerifiableProperties
+     * @param bigQuery a BigQuery instance
+     * @param numThreads the number of committer threads
      */
-    public BigqueryBatchCommitter(final VerifiableProperties properties) {
-        this(constructClientFromProperties(properties), properties.getInt(CONFIG_THREADS, 1));
-    }
-
-    BigqueryBatchCommitter(final BigQuery bigQuery, final int numThreads) {
+    public BigqueryBatchCommitter(final BigQuery bigQuery, final int numThreads) {
         this._bigquery = bigQuery;
         this._executor = Executors.newFixedThreadPool(numThreads);
         this._destTableSchemas = new ConcurrentHashMap<>();
         this._destTableSchemaEvolvers = new ConcurrentHashMap<>();
-    }
-
-    private static BigQuery constructClientFromProperties(final VerifiableProperties properties) {
-        String credentialsPath = properties.getString("credentialsPath");
-        String projectId = properties.getString("projectId");
-        try {
-            Credentials credentials = GoogleCredentials
-                    .fromStream(new FileInputStream(credentialsPath));
-            return BigQueryOptions.newBuilder()
-                    .setProjectId(projectId)
-                    .setCredentials(credentials).build().getService();
-        } catch (FileNotFoundException e) {
-            LOG.error("Credentials path {} does not exist", credentialsPath);
-            throw new RuntimeException(e);
-        } catch (IOException e) {
-            LOG.error("Unable to read credentials: {}", credentialsPath);
-            throw new RuntimeException(e);
-        }
     }
 
     private synchronized boolean createOrUpdateTable(String destination) {
@@ -236,8 +207,7 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
                         insertErrors = insertRowsAndMapErrors(insertAllRequest);
                     }
                 } catch (final Exception e) {
-                    final DatastreamTransientException wrappedException = new DatastreamTransientException(e);
-                    insertErrors = IntStream.range(0, batch.size()).boxed().collect(Collectors.toMap(i -> i, i -> wrappedException));
+                    insertErrors = IntStream.range(0, batch.size()).boxed().collect(Collectors.toMap(i -> i, i -> e));
                 }
             }
 
@@ -273,10 +243,10 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
             final InsertAllResponse response = _bigquery.insertAll(insertAllRequest);
             insertErrors = response.getInsertErrors().entrySet().stream().collect(Collectors.toMap(
                     entry -> entry.getKey().intValue(),
-                    entry -> new DatastreamTransientException(entry.getValue().toString())
+                    entry -> new TransientStreamingInsertException(entry.getValue().toString())
             ));
         } catch (final Exception e) {
-            final DatastreamTransientException wrappedException = new DatastreamTransientException(e);
+            final TransientStreamingInsertException wrappedException = new TransientStreamingInsertException(e);
             insertErrors = IntStream.range(0, insertAllRequest.getRows().size()).boxed().collect(Collectors.toMap(i -> i, i -> wrappedException));
         }
         return insertErrors;

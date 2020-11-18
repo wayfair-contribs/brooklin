@@ -5,10 +5,27 @@
  */
 package com.linkedin.datastream.bigquery;
 
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.IOException;
 import java.time.Duration;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
+import com.google.auth.Credentials;
+import com.google.auth.oauth2.GoogleCredentials;
+import com.google.cloud.bigquery.BigQuery;
+import com.google.cloud.bigquery.BigQueryOptions;
+import com.linkedin.datastream.serde.Deserializer;
+import io.confluent.kafka.schemaregistry.client.CachedSchemaRegistryClient;
+import io.confluent.kafka.serializers.AbstractKafkaAvroSerDeConfig;
+import io.confluent.kafka.serializers.KafkaAvroDeserializer;
+import io.confluent.kafka.serializers.KafkaAvroDeserializerConfig;
+import io.confluent.kafka.serializers.KafkaAvroSerializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -39,9 +56,11 @@ public class BigqueryTransportProviderAdmin implements TransportProviderAdmin {
     private static final String CONFIG_MAX_BATCH_AGE = "maxBatchAge";
     private static final String CONFIG_MAX_INFLIGHT_COMMITS = "maxInflightCommits";
 
-    private static final String CONFIG_TRANSLATOR_DOMAIN_PREFIX = "translator";
+    private static final String CONFIG_SCHEMA_REGISTRY_URL = "translator.schemaRegistry.URL";
 
     protected static final String CONFIG_COMMITTER_DOMAIN_PREFIX = "committer";
+    private static final String CONFIG_THREADS = "threads";
+
     protected static final String CONFIG_SCHEMA_EVOLVERS_DOMAIN_PREFIX = "schemaEvolvers";
 
     private final BigqueryTransportProvider _transportProvider;
@@ -50,31 +69,80 @@ public class BigqueryTransportProviderAdmin implements TransportProviderAdmin {
      * Constructor for BigqueryTransportProviderAdmin.
      * @param props TransportProviderAdmin configuration properties, e.g. number of committer threads, file format.
      */
-    public BigqueryTransportProviderAdmin(String transportProviderName, Properties props) {
-        VerifiableProperties tpProperties = new VerifiableProperties(props);
+    public BigqueryTransportProviderAdmin(final String transportProviderName, final Properties props) {
+        final VerifiableProperties tpProperties = new VerifiableProperties(props);
 
-        VerifiableProperties committerProperties = new VerifiableProperties(tpProperties.getDomainProperties(
-                CONFIG_COMMITTER_DOMAIN_PREFIX, false));
+        final BigqueryBatchCommitter committer;
+        {
+            final VerifiableProperties committerProperties = new VerifiableProperties(tpProperties.getDomainProperties(CONFIG_COMMITTER_DOMAIN_PREFIX));
+            final BigQuery bigQuery = constructBigQueryClientFromProperties(committerProperties);
+            final int committerThreads = committerProperties.getInt(CONFIG_THREADS, 1);
+            committer = new BigqueryBatchCommitter(bigQuery, committerThreads);
+        }
 
-        final VerifiableProperties schemaEvolversProperties = new VerifiableProperties(tpProperties.getDomainProperties(CONFIG_SCHEMA_EVOLVERS_DOMAIN_PREFIX));
-        final Map<String, BigquerySchemaEvolver> bigquerySchemaEvolverMap = BigquerySchemaEvolverFactory.createBigquerySchemaEvolvers(schemaEvolversProperties);
+        final int maxBatchAge = tpProperties.getInt(CONFIG_MAX_BATCH_AGE, 500);
+        final List<BatchBuilder> batchBuilders;
+        final Serializer valueSerializer;
+        final Deserializer valueDeserializer;
+        {
+            {
+                final io.confluent.kafka.schemaregistry.client.SchemaRegistryClient confluentSchemaRegistryClient = new CachedSchemaRegistryClient(
+                        tpProperties.getStringList(CONFIG_SCHEMA_REGISTRY_URL), AbstractKafkaAvroSerDeConfig.MAX_SCHEMAS_PER_SUBJECT_DEFAULT);
+
+                final Map<String, Object> valueSerDeConfig = new HashMap<>();
+                valueSerDeConfig.put(KafkaAvroDeserializerConfig.SCHEMA_REGISTRY_URL_CONFIG, tpProperties.getString(CONFIG_SCHEMA_REGISTRY_URL));
+
+                valueSerializer = new KafkaSerializer(new KafkaAvroSerializer(confluentSchemaRegistryClient, valueSerDeConfig));
+                valueDeserializer = new KafkaDeserializer(new KafkaAvroDeserializer(confluentSchemaRegistryClient, valueSerDeConfig));
+            }
+
+            final VerifiableProperties schemaEvolversProperties = new VerifiableProperties(tpProperties.getDomainProperties(CONFIG_SCHEMA_EVOLVERS_DOMAIN_PREFIX));
+            final String defaultSchemaEvolverName = schemaEvolversProperties.getString("default");
+            final Map<String, BigquerySchemaEvolver> bigquerySchemaEvolverMap = BigquerySchemaEvolverFactory.createBigquerySchemaEvolvers(schemaEvolversProperties);
+
+            final int maxBatchSize = tpProperties.getInt(CONFIG_MAX_BATCH_SIZE, 100000);
+            final int maxInFlightCommits = tpProperties.getInt(CONFIG_MAX_INFLIGHT_COMMITS, 1);
+            final int batchQueueSize = tpProperties.getInt(CONFIG_BATCHBUILDER_QUEUE_SIZE, 1000);
+            final int batchBuilderCount = tpProperties.getInt(CONFIG_BATCHBUILDER_THREAD_COUNT, 5);
+            batchBuilders = IntStream.range(0, batchBuilderCount)
+                    .mapToObj(i -> new BatchBuilder(
+                            maxBatchSize,
+                            maxBatchAge,
+                            maxInFlightCommits,
+                            committer,
+                            batchQueueSize,
+                            valueDeserializer,
+                            bigquerySchemaEvolverMap,
+                            defaultSchemaEvolverName)).collect(Collectors.toList());
+        }
 
         _transportProvider = new BigqueryTransportProvider.BigqueryTransportProviderBuilder()
                 .setTransportProviderName(transportProviderName)
-                .setBatchBuilderQueueSize(tpProperties.getInt(CONFIG_BATCHBUILDER_QUEUE_SIZE, 1000))
-                .setBatchBuilderCount(tpProperties.getInt(CONFIG_BATCHBUILDER_THREAD_COUNT, 5))
-                .setMaxBatchSize(tpProperties.getInt(CONFIG_MAX_BATCH_SIZE, 100000))
-                .setMaxBatchAge(tpProperties.getInt(CONFIG_MAX_BATCH_AGE, 500))
-                .setMaxInflightBatchCommits(tpProperties.getInt(CONFIG_MAX_INFLIGHT_COMMITS, 1))
-                .setCommitter(new BigqueryBatchCommitter(committerProperties))
-                .setTranslatorProperties(new VerifiableProperties(tpProperties.getDomainProperties(CONFIG_TRANSLATOR_DOMAIN_PREFIX)))
-                .setBigquerySchemaEvolvers(bigquerySchemaEvolverMap)
-                .setDefaultBigquerySchemaEvolverName(schemaEvolversProperties.getString("default"))
+                .setMaxBatchAge(maxBatchAge)
+                .setCommitter(committer)
+                .setValueSerializer(valueSerializer)
+                .setValueDeserializer(valueDeserializer)
+                .setBatchBuilders(batchBuilders)
                 .build();
     }
 
-    BigqueryTransportProviderAdmin(final BigqueryTransportProvider provider) {
-        _transportProvider = provider;
+
+    private static BigQuery constructBigQueryClientFromProperties(final VerifiableProperties properties) {
+        String credentialsPath = properties.getString("credentialsPath");
+        String projectId = properties.getString("projectId");
+        try {
+            Credentials credentials = GoogleCredentials
+                    .fromStream(new FileInputStream(credentialsPath));
+            return BigQueryOptions.newBuilder()
+                    .setProjectId(projectId)
+                    .setCredentials(credentials).build().getService();
+        } catch (FileNotFoundException e) {
+            LOG.error("Credentials path {} does not exist", credentialsPath);
+            throw new RuntimeException(e);
+        } catch (IOException e) {
+            LOG.error("Unable to read credentials: {}", credentialsPath);
+            throw new RuntimeException(e);
+        }
     }
 
     @Override

@@ -135,12 +135,14 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
                 } catch (BigQueryException e) {
                     final Table currentTable = _bigquery.getTable(tableId);
                     final Schema currentTableSchema = currentTable.getDefinition().getSchema();
-                    if (existingTableSchema.equals(currentTableSchema)) {
-                        LOG.error("Failed to update table {}", destination, e);
-                        throw e;
-                    } else {
+                    if (evolvedSchema.equals(currentTableSchema)) {
+                        LOG.info("Schema already evolved for table {}", destination);
+                    } else if (!existingTableSchema.equals(currentTableSchema)) {
                         LOG.warn("Concurrent table schema update exception encountered for table {}. Retrying update with new base schema...", destination, e);
                         updateTable(destination, desiredTableSchema, timePartitioning, tableId, currentTable);
+                    } else {
+                        LOG.error("Failed to update schema for table {}", destination, e);
+                        throw e;
                     }
                 }
                 LOG.debug("Table {} updated with evolved schema", destination);

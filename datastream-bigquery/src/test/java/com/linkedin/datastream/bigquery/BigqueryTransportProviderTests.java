@@ -1,9 +1,13 @@
 package com.linkedin.datastream.bigquery;
 
 import com.codahale.metrics.MetricRegistry;
+import com.google.api.client.util.DateTime;
 import com.google.api.services.bigquery.model.TableRow;
 import com.google.cloud.bigquery.BigQuery;
+import com.google.cloud.bigquery.BigQueryError;
+import com.google.cloud.bigquery.BigQueryException;
 import com.google.cloud.bigquery.InsertAllRequest;
+import com.google.cloud.bigquery.InsertAllResponse;
 import com.google.cloud.bigquery.StandardTableDefinition;
 import com.google.cloud.bigquery.Table;
 import com.google.cloud.bigquery.TableDefinition;
@@ -24,10 +28,12 @@ import com.linkedin.datastream.server.DatastreamProducerRecordBuilder;
 import io.confluent.kafka.schemaregistry.client.MockSchemaRegistryClient;
 import io.confluent.kafka.schemaregistry.client.rest.exceptions.RestClientException;
 import io.confluent.kafka.serializers.KafkaAvroSerializer;
+import io.confluent.kafka.serializers.KafkaAvroSerializerConfig;
 import org.apache.avro.Schema;
 import org.apache.avro.SchemaBuilder;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.avro.generic.GenericRecordBuilder;
+import org.apache.zookeeper.Environment;
 import org.mockito.ArgumentCaptor;
 import org.testng.annotations.BeforeClass;
 import org.testng.annotations.BeforeMethod;
@@ -36,15 +42,21 @@ import org.testng.annotations.Test;
 import java.io.IOException;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.Collections;
+import java.util.Date;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
+import static org.mockito.Matchers.any;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
@@ -64,7 +76,7 @@ public class BigqueryTransportProviderTests {
     }
 
     @Test
-    public void testSendHappyPath() throws IOException, RestClientException {
+    public void testSendHappyPath() {
         final int maxBatchAge = 10;
         final int maxBatchSize = 10;
         final int maxInflightCommits = 10;
@@ -73,9 +85,16 @@ public class BigqueryTransportProviderTests {
 
         final Schema schema = SchemaBuilder.builder("com.linkedin").record("test_message")
                 .fields().name("message").type("string").noDefault().endRecord();
-        final List<GenericRecord> events = IntStream.range(0, totalEvents)
-                .mapToObj(i -> new GenericRecordBuilder(schema).set("message", "payload " + i).build())
+        final List<Map<String, ?>> data = IntStream.range(0, totalEvents)
+                .mapToObj(i -> ImmutableMap.of("message", "payload " + i))
                 .collect(Collectors.toList());
+
+        final List<GenericRecord> events = data.stream()
+                .map(recordData -> {
+                    final GenericRecordBuilder builder = new GenericRecordBuilder(schema);
+                    recordData.forEach(builder::set);
+                    return builder.build();
+                }).collect(Collectors.toList());
 
         final BigqueryBatchCommitter committer = new BigqueryBatchCommitter(bigQuery, 1);
         final BatchBuilder batchBuilder = new BatchBuilder(
@@ -89,40 +108,31 @@ public class BigqueryTransportProviderTests {
         final String destination = String.format("%s/%s", datasetName, retention);
         final String topicName = getUniqueTopicName();
 
-        schemaRegistryClient.register(topicName + schemaNameSuffix, schema);
-
         final TableId tableId = TableId.of(datasetName, topicName);
         final TableId insertTableId = TableId.of(tableId.getDataset(),
-                String.format("%s$%s", tableId.getTable(), LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"))));
+                String.format("%s$%s", tableId.getTable(), LocalDate.now(ZoneOffset.UTC).format(DateTimeFormatter.ofPattern("yyyyMMdd"))));
 
-        final TableDefinition tableDefinition = StandardTableDefinition.newBuilder()
-                .setSchema(SchemaTranslator.translate(schema))
-                .setTimePartitioning(TimePartitioning.of(TimePartitioning.Type.DAY))
-                .build();
-        final TableInfo tableInfo = TableInfo.newBuilder(tableId, tableDefinition).build();
+        final InsertAllResponse insertAllResponse = mock(InsertAllResponse.class);
+        when(insertAllResponse.getInsertErrors()).thenReturn(ImmutableMap.of());
+        when(bigQuery.insertAll(any(InsertAllRequest.class))).thenReturn(insertAllResponse);
 
-        final Table mockedTable = mock(Table.class);
-        when(mockedTable.getDefinition()).thenReturn(tableDefinition);
-
-        when(bigQuery.getTable(tableId)).thenReturn(null, mockedTable);
-
+        final DateTime eventTimestamp = new DateTime(new Date(System.currentTimeMillis()));
         try (final BigqueryTransportProvider transportProvider = new BigqueryTransportProvider("test", committer, batchBuilders, maxBatchAge)) {
-            sendEvents(transportProvider, destination, topicName, 0, events);
+            sendEvents(transportProvider, destination, topicName, 0, events, eventTimestamp);
         }
-
-        verify(bigQuery).create(tableInfo);
 
         final ArgumentCaptor<InsertAllRequest> requestArgumentCaptor = ArgumentCaptor.forClass(InsertAllRequest.class);
         verify(bigQuery, atLeastOnce()).insertAll(requestArgumentCaptor.capture());
         final List<InsertAllRequest> capturedRequests = requestArgumentCaptor.getAllValues();
 
-        int rowsChecked = 0;
-        for (final InsertAllRequest request : capturedRequests) {
-            final int actualRequestRowCount = request.getRows().size();
-            assertEquals(request, getExpectedRequest(request, insertTableId, events.subList(rowsChecked, rowsChecked + actualRequestRowCount)));
-            rowsChecked += actualRequestRowCount;
-        }
-        assertEquals(rowsChecked, events.size());
+        capturedRequests.forEach(request -> assertEquals(request.getTable(), insertTableId));
+        final List<Map<String, Object>> insertedData = capturedRequests.stream()
+                .flatMap(request -> request.getRows().stream().map(row -> row.getContent().entrySet().stream()
+                        .filter(entry -> !"__metadata".equals(entry.getKey()))
+                        .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue))
+                )).collect(Collectors.toList());
+
+        assertEquals(insertedData, data);
     }
 
     private static InsertAllRequest.RowToInsert getExpectedRowToInsert(final InsertAllRequest.RowToInsert actualRow, final GenericRecord expectedRecord) {
@@ -145,19 +155,32 @@ public class BigqueryTransportProviderTests {
 
         final Schema schema1 = SchemaBuilder.builder("com.linkedin").record("test_message")
                 .fields().name("message").type("string").noDefault().endRecord();
-        final List<GenericRecord> events1 = IntStream.range(0, 15)
-                .mapToObj(i -> new GenericRecordBuilder(schema1).set("message", "payload " + i).build())
+
+        final List<Map<String, ?>> data1 = IntStream.range(0, 15)
+                .mapToObj(i -> ImmutableMap.of("message", "payload " + i))
                 .collect(Collectors.toList());
+        final List<GenericRecord> events1 = data1.stream()
+                .map(recordData -> {
+                    final GenericRecordBuilder builder = new GenericRecordBuilder(schema1);
+                    recordData.forEach(builder::set);
+                    return builder.build();
+                }).collect(Collectors.toList());
+
 
         final Schema schema2 = SchemaBuilder.builder("com.linkedin").record("test_message")
                 .fields()
                 .name("message").type("string").noDefault()
                 .name("new_message").type("string").noDefault()
                 .endRecord();
-        final List<GenericRecord> events2 = IntStream.range(15, 30)
-                .mapToObj(i -> new GenericRecordBuilder(schema2).set("message", "payload " + i)
-                        .set("new_message", "new payload " + i).build())
+        final List<Map<String, ?>> data2 = IntStream.range(0, 15)
+                .mapToObj(i -> ImmutableMap.of("message", "payload " + i, "new_message", "new payload " + i))
                 .collect(Collectors.toList());
+        final List<GenericRecord> events2 = data2.stream()
+                .map(recordData -> {
+                    final GenericRecordBuilder builder = new GenericRecordBuilder(schema2);
+                    recordData.forEach(builder::set);
+                    return builder.build();
+                }).collect(Collectors.toList());
 
         final BigqueryBatchCommitter committer = new BigqueryBatchCommitter(bigQuery, 1);
 
@@ -171,11 +194,9 @@ public class BigqueryTransportProviderTests {
         final String destination = String.format("%s/%s", datasetName, retention);
         final String topicName = getUniqueTopicName();
 
-        schemaRegistryClient.register(topicName + schemaNameSuffix, schema1);
-
         final TableId tableId = TableId.of(datasetName, topicName);
         final TableId insertTableId = TableId.of(tableId.getDataset(),
-                String.format("%s$%s", tableId.getTable(), LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"))));
+                String.format("%s$%s", tableId.getTable(), LocalDate.now(ZoneOffset.UTC).format(DateTimeFormatter.ofPattern("yyyyMMdd"))));
 
         final com.google.cloud.bigquery.Schema firstSchema = SchemaTranslator.translate(schema1);
         final TableDefinition tableDefinition = StandardTableDefinition.newBuilder()
@@ -197,52 +218,61 @@ public class BigqueryTransportProviderTests {
         final Table evolvedTable = mock(Table.class);
         when(evolvedTable.getDefinition()).thenReturn(evolvedTableDefinition);
         when(tableBuilder.build()).thenReturn(evolvedTable);
-        when(bigQuery.getTable(tableId)).thenReturn(null, mockedTable);
-        doAnswer(invocation -> {
-            when(bigQuery.getTable(tableId)).thenReturn(evolvedTable);
-            return null;
-        }).when(evolvedTable).update();
+        final AtomicBoolean tableUpdated = new AtomicBoolean(false);
+        when(bigQuery.getTable(tableId)).thenReturn(mockedTable);
+        final List<Map<String, Object>> insertedData = new LinkedList<>();
+        when(bigQuery.insertAll(any(InsertAllRequest.class))).then(invocation -> {
+            final InsertAllRequest request = invocation.getArgumentAt(0, InsertAllRequest.class);
+            if (request.getRows().stream().anyMatch(row -> row.getContent().containsKey("new_message"))) {
+                if (tableUpdated.get()) {
+                    //request.getRows().stream().map(row -> row.getContent().entrySet().stream()
+                    //                        .filter(entry -> !"__metadata".equals(entry.getKey()))
+                    //                        .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue))
+                    request.getRows().forEach(row -> insertedData.add(row.getContent().entrySet().stream()
+                            .filter(entry -> !"__metadata".equals(entry.getKey()))
+                            .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue))));
+                    final InsertAllResponse response = mock(InsertAllResponse.class);
+                    when(response.getInsertErrors()).thenReturn(ImmutableMap.of());
+                    return response;
+                } else {
+                    throw new BigQueryException(400, "Table missing column", new BigQueryError("invalid", "new_message", "Table missing column"));
+                }
+            } else {
+                request.getRows().forEach(row -> insertedData.add(row.getContent().entrySet().stream()
+                        .filter(entry -> !"__metadata".equals(entry.getKey()))
+                        .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue))));
+                final InsertAllResponse response = mock(InsertAllResponse.class);
+                when(response.getInsertErrors()).thenReturn(ImmutableMap.of());
+                return response;
+            }
+        });
+        when(evolvedTable.update()).then(invocation -> {
+            if (!tableUpdated.get()) {
+                tableUpdated.set(true);
+                return mock(Table.class);
+            } else {
+                throw new IllegalStateException("Table already updated");
+            }
+        });
 
         try (final BigqueryTransportProvider transportProvider = new BigqueryTransportProvider("test", committer, batchBuilders, maxBatchAge)) {
-            sendEvents(transportProvider, destination, topicName, 0, events1);
+            final DateTime eventTimestamp1 = new DateTime(new Date(System.currentTimeMillis()));
+            sendEvents(transportProvider, destination, topicName, 0, events1, eventTimestamp1);
 
-            verify(bigQuery).create(tableInfo);
+            verify(bigQuery, atLeastOnce()).insertAll(any(InsertAllRequest.class));
 
-            final ArgumentCaptor<InsertAllRequest> requestArgumentCaptor1 = ArgumentCaptor.forClass(InsertAllRequest.class);
-            verify(bigQuery, atLeastOnce()).insertAll(requestArgumentCaptor1.capture());
-            final List<InsertAllRequest> capturedRequests1 = ImmutableList.copyOf(requestArgumentCaptor1.getAllValues());
-
-            int rowsChecked = 0;
-            for (final InsertAllRequest request : capturedRequests1) {
-                final int actualRequestRowCount = request.getRows().size();
-                assertEquals(request, getExpectedRequest(request, insertTableId, events1.subList(rowsChecked, rowsChecked + actualRequestRowCount)));
-                rowsChecked += actualRequestRowCount;
-            }
-            assertEquals(rowsChecked, events1.size());
-
-            schemaRegistryClient.register(topicName + schemaNameSuffix, schema2);
-
-            sendEvents(transportProvider, destination, topicName, 0, events2);
+            final DateTime eventTimestamp2 = new DateTime(new Date(System.currentTimeMillis()));
+            sendEvents(transportProvider, destination, topicName, 0, events2, eventTimestamp2);
 
             verify(evolvedTable).update();
+            verify(bigQuery, atLeastOnce()).insertAll(any(InsertAllRequest.class));
 
-            final ArgumentCaptor<InsertAllRequest> requestArgumentCaptor2 = ArgumentCaptor.forClass(InsertAllRequest.class);
-            verify(bigQuery, atLeastOnce()).insertAll(requestArgumentCaptor2.capture());
-            final List<InsertAllRequest> capturedRequests2 = ImmutableList.copyOf(requestArgumentCaptor2.getAllValues());
-
-            rowsChecked = 0;
-            for (final InsertAllRequest request : capturedRequests2.subList(capturedRequests1.size(), capturedRequests2.size())) {
-                final int actualRequestRowCount = request.getRows().size();
-                assertEquals(request, getExpectedRequest(request, insertTableId, events2.subList(rowsChecked, rowsChecked + actualRequestRowCount)));
-                rowsChecked += actualRequestRowCount;
-            }
-            assertEquals(rowsChecked, events2.size());
+            assertEquals(insertedData, Stream.concat(data1.stream(), data2.stream()).collect(Collectors.toList()));
         }
     }
 
     private static final String schemaNameSuffix = "-value";
 
-    private MockSchemaRegistryClient schemaRegistryClient;
     private SchemaRegistry schemaRegistry;
     private KafkaAvroSerializer serializer;
     private BigQuery bigQuery;
@@ -251,17 +281,19 @@ public class BigqueryTransportProviderTests {
 
     @BeforeMethod
     void beforeTest() {
-        schemaRegistryClient = new MockSchemaRegistryClient();
-        schemaRegistry = new SchemaRegistry("http://schema-registry/", schemaRegistryClient, schemaNameSuffix);
-        serializer = new KafkaAvroSerializer(schemaRegistryClient);
+        final MockSchemaRegistryClient schemaRegistryClient = new MockSchemaRegistryClient();
+        final String schemaRegistryUrl = "http://schema-registry/";
+        schemaRegistry = new SchemaRegistry(schemaRegistryUrl, schemaRegistryClient, schemaNameSuffix);
+        serializer = new KafkaAvroSerializer(schemaRegistryClient, ImmutableMap.of(KafkaAvroSerializerConfig.SCHEMA_REGISTRY_URL_CONFIG, schemaRegistryUrl));
         bigQuery = mock(BigQuery.class);
         defaultSchemaEvolverName = "simple";
         schemaEvolvers = Collections.singletonMap(defaultSchemaEvolverName, new SimpleBigquerySchemaEvolver());
     }
 
-    private void sendEvents(final BigqueryTransportProvider transportProvider, final String destination, final String topicName, final int partition, final List<GenericRecord> events) {
+    private void sendEvents(final BigqueryTransportProvider transportProvider, final String destination, final String topicName,
+                            final int partition, final List<GenericRecord> events, final DateTime eventTimestamp) {
         final AtomicInteger callbacksCalledCount = new AtomicInteger();
-        events.stream().map(event -> createRecord(topicName, offsetIncrement.getAndIncrement(), partition, event, Instant.now()))
+        events.stream().map(event -> createRecord(topicName, offsetIncrement.getAndIncrement(), partition, event, eventTimestamp))
                 .forEachOrdered(record -> transportProvider.send(destination, record, ((metadata, exception) -> callbacksCalledCount.incrementAndGet())));
         transportProvider.flush();
         assertTrue(PollUtils.poll(() -> callbacksCalledCount.intValue() == events.size(), 1000, 10000),
@@ -272,9 +304,9 @@ public class BigqueryTransportProviderTests {
 
     private DatastreamProducerRecord createRecord(final String topicName,
                                                   final long offset, final int partition, final GenericRecord event,
-                                                  final Instant eventTimestamp) {
+                                                  final DateTime eventTimestamp) {
         final DatastreamProducerRecordBuilder builder = new DatastreamProducerRecordBuilder();
-        builder.setEventsSourceTimestamp(eventTimestamp.toEpochMilli());
+        builder.setEventsSourceTimestamp(eventTimestamp.getValue());
         final String KAFKA_ORIGIN_TOPIC = "kafka-origin-topic";
         final String KAFKA_ORIGIN_PARTITION = "kafka-origin-partition";
         final String KAFKA_ORIGIN_OFFSET = "kafka-origin-offset";

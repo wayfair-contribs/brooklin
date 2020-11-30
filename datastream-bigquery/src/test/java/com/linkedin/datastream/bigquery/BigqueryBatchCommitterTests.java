@@ -2,9 +2,11 @@ package com.linkedin.datastream.bigquery;
 
 import com.codahale.metrics.MetricRegistry;
 import com.google.cloud.bigquery.BigQuery;
+import com.google.cloud.bigquery.BigQueryError;
 import com.google.cloud.bigquery.BigQueryException;
 import com.google.cloud.bigquery.Field;
 import com.google.cloud.bigquery.InsertAllRequest;
+import com.google.cloud.bigquery.InsertAllResponse;
 import com.google.cloud.bigquery.Schema;
 import com.google.cloud.bigquery.StandardSQLTypeName;
 import com.google.cloud.bigquery.StandardTableDefinition;
@@ -23,14 +25,18 @@ import com.linkedin.datastream.common.SendCallback;
 import com.linkedin.datastream.metrics.DynamicMetricsManager;
 import com.linkedin.datastream.server.api.transport.buffered.CommitCallback;
 import org.mockito.ArgumentCaptor;
+import org.mockito.stubbing.Answer;
+import org.mockito.stubbing.OngoingStubbing;
 import org.testng.annotations.BeforeClass;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 
 import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.mockito.Mockito.*;
 import static org.testng.Assert.assertEquals;
@@ -81,22 +87,46 @@ public class BigqueryBatchCommitterTests {
                         "int", 123
                 ))
         );
-        batchCommitter.commit(rowsToInsert, destination, ImmutableList.of(), ImmutableList.of(
-                    new DatastreamRecordMetadata("test", "test", 0)
-                ),
-                ImmutableList.of(), commitCallback);
+        final TableId insertTableId = TableId.of(tableId.getDataset(),
+                String.format("%s$%s", tableId.getTable(), LocalDate.now(ZoneOffset.UTC).format(DateTimeFormatter.ofPattern("yyyyMMdd"))));
+        final InsertAllRequest insertAllRequest = InsertAllRequest.of(insertTableId, rowsToInsert);
+        final BigQueryException bigqueryException = new BigQueryException(404, "Table not found", new BigQueryError("notFound", null, "Table not found"));
+        final AtomicBoolean tableCreated = new AtomicBoolean(false);
+        when(bigQuery.insertAll(insertAllRequest)).then(invocation -> {
+            if (tableCreated.get()) {
+                return mock(InsertAllResponse.class);
+            } else {
+                throw bigqueryException;
+            }
+        });
 
-        latch.await(1, TimeUnit.SECONDS);
-
-        verify(bigQuery).getTable(tableId);
         final TableDefinition tableDefinition = StandardTableDefinition.newBuilder().setSchema(schema)
                 .setTimePartitioning(TimePartitioning.of(TimePartitioning.Type.DAY))
                 .build();
         final TableInfo tableInfo = TableInfo.newBuilder(tableId, tableDefinition).build();
+        when(bigQuery.create(tableInfo)).then(invocation -> {
+            if (!tableCreated.get()) {
+                tableCreated.set(true);
+                return mock(Table.class);
+            } else {
+                throw new IllegalStateException("Table already created");
+            }
+        });
+
+        final SendCallback mockedRowCallback = mock(SendCallback.class);
+        final ImmutableList<SendCallback> callbacks = ImmutableList.of(mockedRowCallback);
+        final ImmutableList<DatastreamRecordMetadata> metadata = ImmutableList.of(
+                new DatastreamRecordMetadata("test", "test", 0)
+        );
+        final ImmutableList<Long> timestamps = ImmutableList.of(System.currentTimeMillis());
+        batchCommitter.commit(rowsToInsert, destination, callbacks, metadata, timestamps, commitCallback);
+
+        latch.await(1, TimeUnit.SECONDS);
+
+        verify(bigQuery).getTable(tableId);
         verify(bigQuery).create(tableInfo);
-        final TableId insertTableId = TableId.of(tableId.getDataset(),
-                String.format("%s$%s", tableId.getTable(), LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"))));
-        verify(bigQuery).insertAll(InsertAllRequest.of(insertTableId, rowsToInsert));
+        verify(bigQuery, times(2)).insertAll(insertAllRequest);
+        verify(mockedRowCallback).onCompletion(metadata.get(0), null);
     }
 
     @Test
@@ -141,7 +171,7 @@ public class BigqueryBatchCommitterTests {
         latch.await(1, TimeUnit.SECONDS);
 
         verify(bigQuery).getTable(tableId);
-        verify(bigQuery, never()).insertAll(any(InsertAllRequest.class));
+        verify(bigQuery).insertAll(any(InsertAllRequest.class));
 
         final ArgumentCaptor<Exception> exceptionArgumentCaptor = ArgumentCaptor.forClass(Exception.class);
         verify(sendCallback).onCompletion(eq(metadata), exceptionArgumentCaptor.capture());
@@ -172,16 +202,44 @@ public class BigqueryBatchCommitterTests {
 
         when(existingTable.getDefinition()).thenReturn(existingTableDefinition);
 
-        final Table.Builder tableBuilder = mock(Table.Builder.class);
         final Schema evolvedSchema = schemaEvolver.evolveSchema(existingSchema, newSchema);
         final TableDefinition evolvedTableDefinition = StandardTableDefinition.newBuilder()
                 .setSchema(evolvedSchema)
                 .setTimePartitioning(TimePartitioning.of(TimePartitioning.Type.DAY))
                 .build();
+        final Table.Builder tableBuilder = mock(Table.Builder.class);
+        when(existingTable.toBuilder()).thenReturn(tableBuilder);
         when(tableBuilder.setDefinition(evolvedTableDefinition)).thenReturn(tableBuilder);
+
         final Table evolvedTable = mock(Table.class);
         when(tableBuilder.build()).thenReturn(evolvedTable);
-        when(existingTable.toBuilder()).thenReturn(tableBuilder);
+
+        final TableId insertTableId = TableId.of(tableId.getDataset(),
+                String.format("%s$%s", tableId.getTable(), LocalDate.now(ZoneOffset.UTC).format(DateTimeFormatter.ofPattern("yyyyMMdd"))));
+        final ImmutableList<InsertAllRequest.RowToInsert> rowsToInsert = ImmutableList.of(
+                InsertAllRequest.RowToInsert.of(ImmutableMap.of(
+                        "string", "test value 1",
+                        "int", 123,
+                        "new_string", "test value 2"
+                ))
+        );
+        final InsertAllRequest insertAllRequest = InsertAllRequest.of(insertTableId, rowsToInsert);
+        final AtomicBoolean tableUpdated = new AtomicBoolean(false);
+        when(evolvedTable.update()).then(invocation -> {
+            if (!tableUpdated.get()) {
+                tableUpdated.set(true);
+                return mock(Table.class);
+            } else {
+                throw new IllegalStateException("Table already updated");
+            }
+        });
+        when(bigQuery.insertAll(insertAllRequest)).then(invocation -> {
+            if (tableUpdated.get()) {
+                return mock(InsertAllResponse.class);
+            } else {
+                throw new BigQueryException(400, "Missing column", new BigQueryError("invalid", "new_string", "Missing column"));
+            }
+        });
 
         when(bigQuery.getTable(tableId)).thenReturn(existingTable);
 
@@ -192,12 +250,7 @@ public class BigqueryBatchCommitterTests {
             return null;
         }).when(commitCallback).commited();
 
-        final ImmutableList<InsertAllRequest.RowToInsert> rowsToInsert = ImmutableList.of(
-                InsertAllRequest.RowToInsert.of(ImmutableMap.of(
-                        "string", "test",
-                        "int", 123
-                ))
-        );
+
         batchCommitter.commit(rowsToInsert, destination, ImmutableList.of(), ImmutableList.of(
                 new DatastreamRecordMetadata("test", "test", 0)
                 ),
@@ -209,9 +262,8 @@ public class BigqueryBatchCommitterTests {
         verify(bigQuery, never()).create(any(TableInfo.class));
         verify(tableBuilder).setDefinition(evolvedTableDefinition);
         verify(evolvedTable).update();
-        final TableId insertTableId = TableId.of(tableId.getDataset(),
-                String.format("%s$%s", tableId.getTable(), LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"))));
-        verify(bigQuery).insertAll(InsertAllRequest.of(insertTableId, rowsToInsert));
+
+        verify(bigQuery, times(2)).insertAll(insertAllRequest);
     }
 
     @Test
@@ -277,7 +329,7 @@ public class BigqueryBatchCommitterTests {
         verify(bigQuery, times(2)).getTable(tableId);
         verify(bigQuery, never()).create(any(TableInfo.class));
         verify(tableBuilder).setDefinition(evolvedTableDefinition);
-        verify(bigQuery, never()).insertAll(any(InsertAllRequest.class));
+        verify(bigQuery).insertAll(any(InsertAllRequest.class));
 
         final ArgumentCaptor<Exception> exceptionArgumentCaptor = ArgumentCaptor.forClass(Exception.class);
         verify(sendCallback).onCompletion(eq(metadata), exceptionArgumentCaptor.capture());
@@ -360,6 +412,28 @@ public class BigqueryBatchCommitterTests {
                         "int", 123
                 ))
         );
+        final TableId insertTableId = TableId.of(tableId.getDataset(),
+                String.format("%s$%s", tableId.getTable(), LocalDate.now(ZoneOffset.UTC).format(DateTimeFormatter.ofPattern("yyyyMMdd"))));
+        final InsertAllRequest insertAllRequest = InsertAllRequest.of(insertTableId, rowsToInsert);
+
+        final AtomicBoolean tableUpdated = new AtomicBoolean(false);
+        when(evolvedTable2.update()).then(invocation -> {
+            if (!tableUpdated.get()) {
+                tableUpdated.set(true);
+                return mock(Table.class);
+            } else {
+                throw new IllegalStateException("Table already updated");
+            }
+        });
+
+        when(bigQuery.insertAll(insertAllRequest)).then(invocation -> {
+            if (tableUpdated.get()) {
+                return mock(InsertAllResponse.class);
+            } else {
+                throw new BigQueryException(400, "Missing column", new BigQueryError("invalid", "new_string", "Missing column"));
+            }
+        });
+
         batchCommitter.commit(rowsToInsert, destination, ImmutableList.of(), ImmutableList.of(
                 new DatastreamRecordMetadata("test", "test", 0)
                 ),
@@ -376,8 +450,6 @@ public class BigqueryBatchCommitterTests {
         verify(tableBuilder2).setDefinition(evolvedTableDefinition2);
         verify(evolvedTable2).update();
 
-        final TableId insertTableId = TableId.of(tableId.getDataset(),
-                String.format("%s$%s", tableId.getTable(), LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"))));
-        verify(bigQuery).insertAll(InsertAllRequest.of(insertTableId, rowsToInsert));
+        verify(bigQuery, times(2)).insertAll(insertAllRequest);
     }
 }

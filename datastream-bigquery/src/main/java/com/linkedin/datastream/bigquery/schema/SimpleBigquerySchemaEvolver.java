@@ -7,14 +7,16 @@ package com.linkedin.datastream.bigquery.schema;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 import com.google.cloud.bigquery.Field;
 import com.google.cloud.bigquery.FieldList;
-import com.google.cloud.bigquery.LegacySQLTypeName;
 import com.google.cloud.bigquery.Schema;
+import com.google.cloud.bigquery.StandardSQLTypeName;
 import com.google.common.collect.ImmutableList;
+import org.apache.commons.lang3.Validate;
 
 
 /**
@@ -45,7 +47,13 @@ public class SimpleBigquerySchemaEvolver implements BigquerySchemaEvolver {
     }
 
     Field makeNullable(final Field field) {
-        return field.toBuilder().setMode(Field.Mode.NULLABLE).build();
+        final Field nullableField;
+        if (field.getMode() == Field.Mode.REPEATED) {
+            nullableField = field;
+        } else {
+            nullableField = field.toBuilder().setMode(Field.Mode.NULLABLE).build();
+        }
+        return nullableField;
     }
 
     Field addedField(final Field field) {
@@ -67,25 +75,106 @@ public class SimpleBigquerySchemaEvolver implements BigquerySchemaEvolver {
         } else if (baseField.equals(newField)) {
             mergedField = newField;
         } else {
-            if (!baseField.getName().equals(newField.getName())) {
-                throw new IncompatibleSchemaEvolutionException(String.format("field name missmatch: %s != %s", baseField.getName(), newField.getName()));
-            }
-            if (!baseField.getType().equals(newField.getType())) {
-                throw new IncompatibleSchemaEvolutionException(String.format("field type missmatch: %s != %s", baseField.getType(), newField.getType()));
-            }
-            final FieldList mergedSubFields;
-            if (baseField.getType().equals(LegacySQLTypeName.RECORD)) {
-                mergedSubFields = mergeFields(baseField.getSubFields(), newField.getSubFields());
+            Validate.isTrue(baseField.getName().equalsIgnoreCase(newField.getName()), "baseField and newField names do not match");
+            final Field.Builder mergedFieldBuilder = baseField.toBuilder();
+            if (StandardSQLTypeName.STRUCT.equals(baseField.getType().getStandardType())) {
+                mergedFieldBuilder.setType(mergeFieldTypes(baseField.getType().getStandardType(), newField.getType().getStandardType()),
+                        mergeFields(baseField.getSubFields(), newField.getSubFields()));
             } else {
-                mergedSubFields = null;
+                mergedFieldBuilder.setType(mergeFieldTypes(baseField.getType().getStandardType(), newField.getType().getStandardType()));
             }
-            if (baseField.getMode() == newField.getMode()) {
-                mergedField = newField.toBuilder().setType(newField.getType(), mergedSubFields).build();
-            } else {
-                mergedField = newField.toBuilder().setType(newField.getType(), mergedSubFields).setMode(Field.Mode.NULLABLE).build();
+
+            final Field.Mode mergedFieldMode = mergeFieldModes(
+                    Optional.ofNullable(baseField.getMode()).orElse(Field.Mode.NULLABLE),
+                    Optional.ofNullable(newField.getMode()).orElse(Field.Mode.NULLABLE)
+            );
+            if (baseField.getMode() != null || mergedFieldMode != Field.Mode.NULLABLE) {
+                mergedFieldBuilder.setMode(mergedFieldMode);
             }
+            mergedField = mergedFieldBuilder.build();
         }
         return mergedField;
+    }
+
+    StandardSQLTypeName mergeFieldTypes(final StandardSQLTypeName baseType, final StandardSQLTypeName newType) throws IncompatibleSchemaEvolutionException {
+        Validate.notNull(baseType, "baseType cannot be null");
+        Validate.notNull(newType, "newType cannot be null");
+
+        // Support BigQuery type coercion described in https://cloud.google.com/bigquery/docs/reference/standard-sql/conversion_rules
+        final StandardSQLTypeName mergedType;
+        switch (newType) {
+            case INT64:
+                switch(baseType) {
+                    case FLOAT64:
+                    case NUMERIC:
+                    case INT64:
+                        mergedType = baseType;
+                        break;
+                    default:
+                        throw new IncompatibleSchemaEvolutionException(String.format("Cannot coerce type %s into %s", newType, baseType));
+                }
+                break;
+            case NUMERIC:
+                switch (baseType) {
+                    case FLOAT64:
+                    case NUMERIC:
+                        mergedType = baseType;
+                        break;
+                    default:
+                        throw new IncompatibleSchemaEvolutionException(String.format("Cannot coerce type %s into %s", newType, baseType));
+                }
+                break;
+            default:
+                if (newType == baseType) {
+                    mergedType = baseType;
+                } else {
+                    throw new IncompatibleSchemaEvolutionException(String.format("Cannot coerce type %s into %s", newType, baseType));
+                }
+        }
+        return mergedType;
+    }
+
+    Field.Mode mergeFieldModes(final Field.Mode baseMode, final Field.Mode newMode) {
+        Validate.notNull(baseMode, "baseMode cannot be null");
+        Validate.notNull(newMode, "newMode cannot be null");
+        final Field.Mode mergedMode;
+        switch(baseMode) {
+            case REPEATED:
+                switch (newMode) {
+                    case REPEATED:
+                    case NULLABLE:
+                        mergedMode = Field.Mode.REPEATED;
+                        break;
+                    default:
+                        throw new IncompatibleSchemaEvolutionException(String.format("Cannot change field mode from %s to %s", baseMode, newMode));
+                }
+                break;
+            case REQUIRED:
+                switch (newMode) {
+                    case REQUIRED:
+                        mergedMode = Field.Mode.REQUIRED;
+                        break;
+                    case NULLABLE:
+                        mergedMode = Field.Mode.NULLABLE;
+                        break;
+                    default:
+                        throw new IncompatibleSchemaEvolutionException(String.format("Cannot change field mode from %s to %s", baseMode, newMode));
+                }
+                break;
+            case NULLABLE:
+                switch (newMode) {
+                    case NULLABLE:
+                    case REQUIRED:
+                        mergedMode = Field.Mode.NULLABLE;
+                        break;
+                    default:
+                        throw new IncompatibleSchemaEvolutionException(String.format("Cannot change field mode from %s to %s", baseMode, newMode));
+                }
+                break;
+            default:
+                throw new IncompatibleSchemaEvolutionException(String.format("Cannot change field mode from %s to %s", baseMode, newMode));
+        }
+        return mergedMode;
     }
 
 }

@@ -35,6 +35,11 @@ import com.google.cloud.bigquery.InsertAllRequest;
  */
 public class RecordTranslator {
 
+    /**
+     * BiqQuery restricts to 9 decimal digits of scale
+     */
+    private static final int BQ_MAX_DECIMAL_SCALE = 9;
+
     private static boolean isPrimitiveType(Schema.Type type) {
         return (type == Schema.Type.BOOLEAN ||
                 type == Schema.Type.INT ||
@@ -179,8 +184,8 @@ public class RecordTranslator {
                     final LogicalTypes.Decimal decimalType = (LogicalTypes.Decimal) avroSchema.getLogicalType();
                     BigDecimal scaledBigDecimal = new BigDecimal(new BigInteger(((ByteBuffer) record).array()), decimalType.getScale());
                     // BiqQuery restricts to 9 decimal digits of scale
-                    if (decimalType.getScale() > MAX_DECIMAL_SCALE) {
-                        scaledBigDecimal = scaledBigDecimal.setScale(MAX_DECIMAL_SCALE, RoundingMode.HALF_UP);
+                    if (decimalType.getScale() > BQ_MAX_DECIMAL_SCALE) {
+                        scaledBigDecimal = scaledBigDecimal.setScale(BQ_MAX_DECIMAL_SCALE, RoundingMode.HALF_UP);
                     }
                     result = new AbstractMap.SimpleEntry<>(name, scaledBigDecimal);
                 } else {
@@ -203,8 +208,8 @@ public class RecordTranslator {
             LogicalTypes.Decimal decimalType = (LogicalTypes.Decimal) avroSchema.getLogicalType();
             BigDecimal scaledBigDecimal = new BigDecimal(new BigInteger(((GenericFixed) record).bytes()), decimalType.getScale());
             // BiqQuery restricts to 9 decimal digits of scale
-            if (decimalType.getScale() > MAX_DECIMAL_SCALE) {
-                scaledBigDecimal = scaledBigDecimal.setScale(MAX_DECIMAL_SCALE, RoundingMode.HALF_UP);
+            if (decimalType.getScale() > BQ_MAX_DECIMAL_SCALE) {
+                scaledBigDecimal = scaledBigDecimal.setScale(BQ_MAX_DECIMAL_SCALE, RoundingMode.HALF_UP);
             }
             return new AbstractMap.SimpleEntry<>(name, scaledBigDecimal);
         } else {

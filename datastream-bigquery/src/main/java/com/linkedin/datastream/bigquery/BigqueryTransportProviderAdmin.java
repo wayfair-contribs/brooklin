@@ -5,35 +5,18 @@
  */
 package com.linkedin.datastream.bigquery;
 
-import java.io.FileInputStream;
-import java.io.FileNotFoundException;
-import java.io.IOException;
 import java.time.Duration;
-import java.util.HashMap;
-import java.util.List;
+import java.util.Collections;
 import java.util.Map;
-import java.util.Properties;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
-
-import com.google.auth.Credentials;
-import com.google.auth.oauth2.GoogleCredentials;
-import com.google.cloud.bigquery.BigQuery;
-import com.google.cloud.bigquery.BigQueryOptions;
-import com.linkedin.datastream.serde.Deserializer;
-import io.confluent.kafka.schemaregistry.client.CachedSchemaRegistryClient;
-import io.confluent.kafka.serializers.AbstractKafkaAvroSerDeConfig;
-import io.confluent.kafka.serializers.KafkaAvroDeserializer;
-import io.confluent.kafka.serializers.KafkaAvroDeserializerConfig;
-import io.confluent.kafka.serializers.KafkaAvroSerializer;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolver;
-import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolverFactory;
+import com.linkedin.datastream.bigquery.schema.SimpleBigquerySchemaEvolver;
 import com.linkedin.datastream.common.Datastream;
 import com.linkedin.datastream.common.DatastreamDestination;
-import com.linkedin.datastream.common.VerifiableProperties;
+import com.linkedin.datastream.serde.Deserializer;
 import com.linkedin.datastream.server.DatastreamTask;
 import com.linkedin.datastream.server.api.connector.DatastreamValidationException;
 import com.linkedin.datastream.server.api.transport.TransportProvider;
@@ -48,110 +31,88 @@ import com.linkedin.datastream.server.api.transport.TransportProviderAdmin;
  * </ul>
  */
 public class BigqueryTransportProviderAdmin implements TransportProviderAdmin {
-    private static final Logger LOG = LoggerFactory.getLogger(BigqueryTransportProviderAdmin.class);
 
-    private static final String CONFIG_BATCHBUILDER_QUEUE_SIZE = "batchBuilderQueueSize";
-    private static final String CONFIG_BATCHBUILDER_THREAD_COUNT = "batchBuilderThreadCount";
-    private static final String CONFIG_MAX_BATCH_SIZE = "maxBatchSize";
-    private static final String CONFIG_MAX_BATCH_AGE = "maxBatchAge";
-    private static final String CONFIG_MAX_INFLIGHT_COMMITS = "maxInflightCommits";
+    protected static final String METADATA_PROJECT_ID_KEY = "projectId";
+    protected static final String METADATA_DATASET_KEY = "dataset";
+    protected static final String METADATA_TABLE_NAME_TEMPLATE_KEY = "tableNameTemplate";
+    protected static final String METADATA_TABLE_SUFFIX_KEY = "tableNameSuffix";
+    protected static final String METADATA_PARTITION_EXPIRATION_DAYS_KEY = "partitionExpirationDays";
+    protected static final String METADATA_SCHEMA_EVOLVER_KEY = "schemaEvolver";
+    protected static final String METADATA_EXCEPTIONS_TABLE_ENABLED_KEY = "exceptionsTableEnabled";
+    protected static final String METADATA_MANAGE_DESTINATION_TABLE_KEY = "manageDestinationTable";
 
-    private static final String CONFIG_SCHEMA_REGISTRY_URL = "translator.schemaRegistry.URL";
+    private final BigqueryBufferedTransportProvider _bufferedTransportProvider;
+    private final Serializer _valueSerializer;
+    private final Deserializer _valueDeserializer;
+    private final Map<String, String> _defaultMetadata;
 
-    protected static final String CONFIG_COMMITTER_DOMAIN_PREFIX = "committer";
-    private static final String CONFIG_THREADS = "threads";
+    private final BigquerySchemaEvolver _defaultSchemaEvolver;
 
-    protected static final String CONFIG_SCHEMA_EVOLVERS_DOMAIN_PREFIX = "schemaEvolvers";
+    private final BigqueryTransportProviderFactory _bigqueryTransportProviderFactory;
 
-    private final BigqueryTransportProvider _transportProvider;
+    private final Map<String, BigquerySchemaEvolver> _bigquerySchemaEvolverMap;
+    private final Map<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> _datastreamConfigByDestination;
+    private final Map<Datastream, BigqueryTransportProvider> _datastreamTransportProvider;
+    private final Map<BigqueryTransportProvider, Set<DatastreamTask>> _transportProviderTasks;
 
     /**
-     * Constructor for BigqueryTransportProviderAdmin.
-     * @param props TransportProviderAdmin configuration properties, e.g. number of committer threads, file format.
+     * Constructor.
      */
-    public BigqueryTransportProviderAdmin(final String transportProviderName, final Properties props) {
-        final VerifiableProperties tpProperties = new VerifiableProperties(props);
+    public BigqueryTransportProviderAdmin(final BigqueryBufferedTransportProvider bufferedTransportProvider, final Serializer valueSerializer,
+                                          final Deserializer valueDeserializer,
+                                          final Map<String, String> defaultMetadata, final BigquerySchemaEvolver defaultSchemaEvolver,
+                                          final Map<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> datastreamConfigByDestination,
+                                          final Map<String, BigquerySchemaEvolver> bigquerySchemaEvolverMap,
+                                          final BigqueryTransportProviderFactory bigqueryTransportProviderFactory) {
+        this._bufferedTransportProvider = bufferedTransportProvider;
+        this._valueSerializer = valueSerializer;
+        this._valueDeserializer = valueDeserializer;
+        this._defaultMetadata = defaultMetadata;
+        this._defaultSchemaEvolver = defaultSchemaEvolver;
+        this._datastreamConfigByDestination = datastreamConfigByDestination;
+        this._bigquerySchemaEvolverMap = bigquerySchemaEvolverMap;
+        this._bigqueryTransportProviderFactory = bigqueryTransportProviderFactory;
 
-        final BigqueryBatchCommitter committer;
-        {
-            final VerifiableProperties committerProperties = new VerifiableProperties(tpProperties.getDomainProperties(CONFIG_COMMITTER_DOMAIN_PREFIX));
-            final BigQuery bigQuery = constructBigQueryClientFromProperties(committerProperties);
-            final int committerThreads = committerProperties.getInt(CONFIG_THREADS, 1);
-            committer = new BigqueryBatchCommitter(bigQuery, committerThreads);
-        }
-
-        final int maxBatchAge = tpProperties.getInt(CONFIG_MAX_BATCH_AGE, 500);
-        final List<BatchBuilder> batchBuilders;
-        final Serializer valueSerializer;
-        final Deserializer valueDeserializer;
-        {
-            {
-                final io.confluent.kafka.schemaregistry.client.SchemaRegistryClient confluentSchemaRegistryClient = new CachedSchemaRegistryClient(
-                        tpProperties.getStringList(CONFIG_SCHEMA_REGISTRY_URL), AbstractKafkaAvroSerDeConfig.MAX_SCHEMAS_PER_SUBJECT_DEFAULT);
-
-                final Map<String, Object> valueSerDeConfig = new HashMap<>();
-                valueSerDeConfig.put(KafkaAvroDeserializerConfig.SCHEMA_REGISTRY_URL_CONFIG, tpProperties.getString(CONFIG_SCHEMA_REGISTRY_URL));
-
-                valueSerializer = new KafkaSerializer(new KafkaAvroSerializer(confluentSchemaRegistryClient, valueSerDeConfig));
-                valueDeserializer = new KafkaDeserializer(new KafkaAvroDeserializer(confluentSchemaRegistryClient, valueSerDeConfig));
-            }
-
-            final VerifiableProperties schemaEvolversProperties = new VerifiableProperties(tpProperties.getDomainProperties(CONFIG_SCHEMA_EVOLVERS_DOMAIN_PREFIX));
-            final String defaultSchemaEvolverName = schemaEvolversProperties.getString("default");
-            final Map<String, BigquerySchemaEvolver> bigquerySchemaEvolverMap = BigquerySchemaEvolverFactory.createBigquerySchemaEvolvers(schemaEvolversProperties);
-
-            final int maxBatchSize = tpProperties.getInt(CONFIG_MAX_BATCH_SIZE, 100000);
-            final int maxInFlightCommits = tpProperties.getInt(CONFIG_MAX_INFLIGHT_COMMITS, 1);
-            final int batchQueueSize = tpProperties.getInt(CONFIG_BATCHBUILDER_QUEUE_SIZE, 1000);
-            final int batchBuilderCount = tpProperties.getInt(CONFIG_BATCHBUILDER_THREAD_COUNT, 5);
-            batchBuilders = IntStream.range(0, batchBuilderCount)
-                    .mapToObj(i -> new BatchBuilder(
-                            maxBatchSize,
-                            maxBatchAge,
-                            maxInFlightCommits,
-                            committer,
-                            batchQueueSize,
-                            valueDeserializer,
-                            bigquerySchemaEvolverMap,
-                            defaultSchemaEvolverName)).collect(Collectors.toList());
-        }
-
-        _transportProvider = new BigqueryTransportProvider.BigqueryTransportProviderBuilder()
-                .setTransportProviderName(transportProviderName)
-                .setMaxBatchAge(maxBatchAge)
-                .setCommitter(committer)
-                .setValueSerializer(valueSerializer)
-                .setValueDeserializer(valueDeserializer)
-                .setBatchBuilders(batchBuilders)
-                .build();
+        _datastreamTransportProvider = new ConcurrentHashMap<>();
+        _transportProviderTasks = new ConcurrentHashMap<>();
     }
 
 
-    private static BigQuery constructBigQueryClientFromProperties(final VerifiableProperties properties) {
-        String credentialsPath = properties.getString("credentialsPath");
-        String projectId = properties.getString("projectId");
-        try {
-            Credentials credentials = GoogleCredentials
-                    .fromStream(new FileInputStream(credentialsPath));
-            return BigQueryOptions.newBuilder()
-                    .setProjectId(projectId)
-                    .setCredentials(credentials).build().getService();
-        } catch (FileNotFoundException e) {
-            LOG.error("Credentials path {} does not exist", credentialsPath);
-            throw new RuntimeException(e);
-        } catch (IOException e) {
-            LOG.error("Unable to read credentials: {}", credentialsPath);
-            throw new RuntimeException(e);
-        }
+    @Override
+    public TransportProvider assignTransportProvider(final DatastreamTask task) {
+        // Assume that the task has a single datastream
+        final Datastream datastream = task.getDatastreams().get(0);
+        return _datastreamTransportProvider.computeIfAbsent(datastream, d -> {
+            final BigqueryDatastreamConfiguration configuration = getConfigurationFromDatastream(d);
+            final BigqueryTransportProvider transportProvider =  _bigqueryTransportProviderFactory.createTransportProvider(_bufferedTransportProvider,
+                    _valueSerializer, _valueDeserializer, configuration, _datastreamConfigByDestination);
+            _transportProviderTasks.computeIfAbsent(transportProvider, tp -> ConcurrentHashMap.newKeySet()).add(task);
+            return transportProvider;
+        });
+    }
+
+    Map<Datastream, BigqueryTransportProvider> getDatastreamTransportProviders() {
+        return Collections.unmodifiableMap(_datastreamTransportProvider);
+    }
+
+    Map<BigqueryTransportProvider, Set<DatastreamTask>> getTransportProviderTasks() {
+        return Collections.unmodifiableMap(_transportProviderTasks);
     }
 
     @Override
-    public TransportProvider assignTransportProvider(DatastreamTask task) {
-        return _transportProvider;
-    }
-
-    @Override
-    public void unassignTransportProvider(DatastreamTask task) {
+    public void unassignTransportProvider(final DatastreamTask task) {
+        // Assume that the task has a single datastream
+        final Datastream datastream = task.getDatastreams().get(0);
+        _datastreamTransportProvider.computeIfPresent(datastream, (d, transportProvider) ->
+            Optional.ofNullable(_transportProviderTasks.computeIfPresent(transportProvider, (tp, tasks) -> {
+                tasks.remove(task);
+                return tasks.isEmpty() ? null : tasks;
+            })).map(s -> transportProvider).orElseGet(() -> {
+                transportProvider.getDestinations().forEach(_datastreamConfigByDestination::remove);
+                transportProvider.close();
+                return null;
+            })
+        );
     }
 
     @Override
@@ -161,17 +122,24 @@ public class BigqueryTransportProviderAdmin implements TransportProviderAdmin {
             datastream.setDestination(new DatastreamDestination());
         }
 
-        if (!datastream.getMetadata().containsKey("dataset")) {
-            throw new DatastreamValidationException("Metadata dataset is not set in the datastream definition.");
+        if (datastream.getDestination().hasConnectionString()) {
+            try {
+                BigqueryDatastreamDestination.parse(datastream.getDestination().getConnectionString());
+            } catch (IllegalArgumentException e) {
+                throw new DatastreamValidationException("Bigquery datastream destination is malformed", e);
+            }
+        } else {
+            if (!datastream.getMetadata().containsKey("dataset")) {
+                throw new DatastreamValidationException("Metadata dataset is not set in the datastream definition.");
+            }
+
+            final BigqueryDatastreamDestination datastreamDestination = new BigqueryDatastreamDestination(
+                    datastream.getMetadata().getOrDefault(METADATA_PROJECT_ID_KEY, _defaultMetadata.get(METADATA_PROJECT_ID_KEY)),
+                    datastream.getMetadata().get("dataset"),
+                    destinationName
+            );
+            datastream.getDestination().setConnectionString(datastreamDestination.toString());
         }
-
-        String destination = datastream.getMetadata().get("dataset")
-                + "/"
-                + (datastream.getMetadata().containsKey("partitionExpirationDays") ? datastream.getMetadata().get("partitionExpirationDays") : "-1")
-                + "/"
-                + (datastream.getMetadata().containsKey("tableSuffix") ? datastream.getMetadata().get("tableSuffix") : "");
-
-        datastream.getDestination().setConnectionString(destination);
     }
 
     @Override
@@ -185,5 +153,32 @@ public class BigqueryTransportProviderAdmin implements TransportProviderAdmin {
     @Override
     public Duration getRetention(Datastream datastream) {
         return Duration.ofSeconds(0);
+    }
+
+    BigqueryDatastreamConfiguration getConfigurationFromDatastreamTask(final DatastreamTask task) {
+        // Assume that the task has a single datastream
+        final Datastream datastream = task.getDatastreams().get(0);
+        return getConfigurationFromDatastream(datastream);
+    }
+
+    BigqueryDatastreamConfiguration getConfigurationFromDatastream(final Datastream datastream) {
+        final Map<String, String> metadata = datastream.getMetadata();
+        return new BigqueryDatastreamConfiguration(
+                Optional.ofNullable(metadata.get(METADATA_SCHEMA_EVOLVER_KEY)).map(
+                        name -> Optional.ofNullable(_bigquerySchemaEvolverMap.get(name))
+                                .orElseThrow(() -> new IllegalStateException(String.format("schema evolver not found with name: %s", name))
+                                )).orElse(_defaultSchemaEvolver),
+                Optional.ofNullable(metadata.getOrDefault(METADATA_MANAGE_DESTINATION_TABLE_KEY, _defaultMetadata.get(METADATA_MANAGE_DESTINATION_TABLE_KEY)))
+                        .map(Boolean::valueOf).orElse(true),
+                Optional.ofNullable(metadata.getOrDefault(METADATA_PARTITION_EXPIRATION_DAYS_KEY, _defaultMetadata.get(METADATA_PARTITION_EXPIRATION_DAYS_KEY)))
+                        .map(Long::valueOf).orElse(null),
+                Optional.ofNullable(metadata.get(METADATA_TABLE_NAME_TEMPLATE_KEY))
+                        .orElse(Optional.ofNullable(metadata.get(METADATA_TABLE_SUFFIX_KEY))
+                                .map(suffix -> "%s" + suffix).orElse(null)),
+                Optional.ofNullable(metadata.getOrDefault(METADATA_EXCEPTIONS_TABLE_ENABLED_KEY,
+                        _defaultMetadata.get(METADATA_EXCEPTIONS_TABLE_ENABLED_KEY))).filter(Boolean::parseBoolean)
+                        .map(enabled -> new BigqueryDatastreamConfiguration(new SimpleBigquerySchemaEvolver(), true))
+                        .orElse(null)
+        );
     }
 }

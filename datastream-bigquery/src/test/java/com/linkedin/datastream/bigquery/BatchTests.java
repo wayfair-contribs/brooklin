@@ -67,13 +67,14 @@ public class BatchTests {
 
         schemaRegistryClient.register(topicName + "-value", avroSchema);
 
+        final String projectId = "project_name";
         final String datasetName = "dataset_name";
-        final long retention = -1;
-        final String packageDestination = String.join("/", datasetName, Long.toString(retention));
+        final String tableName = "table_name";
+        final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination(projectId, datasetName, tableName);
 
         final Package aPackage = new Package.PackageBuilder()
                 .setTopic(topicName)
-                .setDestination(packageDestination)
+                .setDestination(destination.toString())
                 .setOffset("0")
                 .setPartition("0")
                 .setCheckpoint("test")
@@ -83,9 +84,8 @@ public class BatchTests {
 
         batch.write(aPackage);
 
-        final String committerDestination = String.join("/", datasetName, topicName, Long.toString(retention));
         final com.google.cloud.bigquery.Schema bqSchema = SchemaTranslator.translate(avroSchema);
-        verify(committer).setDestTableSchema(committerDestination, bqSchema);
+        verify(committer).setDestTableSchema(destination, bqSchema);
     }
 
     @Test
@@ -102,13 +102,14 @@ public class BatchTests {
 
             schemaRegistryClient.register(topicName + "-value", avroSchema);
 
+            final String projectId = "project_name";
             final String datasetName = "dataset_name";
-            final long retention = -1;
-            final String packageDestination = String.join("/", datasetName, Long.toString(retention));
+            final String tableName = "table_name";
+            final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination(projectId, datasetName, tableName);
 
             final Package aPackage = new Package.PackageBuilder()
                     .setTopic(topicName)
-                    .setDestination(packageDestination)
+                    .setDestination(destination.toString())
                     .setOffset("0")
                     .setPartition("0")
                     .setCheckpoint("test")
@@ -118,9 +119,8 @@ public class BatchTests {
 
             batch.write(aPackage);
 
-            final String committerDestination = String.join("/", datasetName, topicName, Long.toString(retention));
             final com.google.cloud.bigquery.Schema bqSchema = SchemaTranslator.translate(avroSchema);
-            verify(committer).setDestTableSchema(committerDestination, bqSchema);
+            verify(committer).setDestTableSchema(destination, bqSchema);
         }
         final org.apache.avro.Schema newAvroSchema = SchemaBuilder.builder("com.linkedin")
                 .record("test_message").fields()
@@ -137,13 +137,14 @@ public class BatchTests {
 
         schemaRegistryClient.register(topicName + "-value", newAvroSchema);
 
+        final String projectId = "project_name";
         final String datasetName = "dataset_name";
-        final long retention = -1;
-        final String packageDestination = String.join("/", datasetName, Long.toString(retention));
+        final String tableName = "table_name";
+        final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination(projectId, datasetName, tableName);
 
         final Package aPackage = new Package.PackageBuilder()
                 .setTopic(topicName)
-                .setDestination(packageDestination)
+                .setDestination(destination.toString())
                 .setOffset("1")
                 .setPartition("0")
                 .setCheckpoint("test")
@@ -153,9 +154,8 @@ public class BatchTests {
 
         batch.write(aPackage);
 
-        final String committerDestination = String.join("/", datasetName, topicName, Long.toString(retention));
         final com.google.cloud.bigquery.Schema bqSchema = schemaEvolver.evolveSchema(SchemaTranslator.translate(avroSchema), SchemaTranslator.translate(newAvroSchema));
-        verify(committer).setDestTableSchema(committerDestination, bqSchema);
+        verify(committer).setDestTableSchema(destination, bqSchema);
 
     }
 }

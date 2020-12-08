@@ -7,10 +7,12 @@ package com.linkedin.datastream.bigquery;
 
 import java.nio.ByteBuffer;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
-import java.util.List;
+import java.util.HashSet;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
+import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.apache.avro.Schema;
@@ -31,15 +33,17 @@ import com.linkedin.datastream.common.SendCallback;
 import com.linkedin.datastream.serde.Deserializer;
 import com.linkedin.datastream.server.DatastreamProducerRecord;
 import com.linkedin.datastream.server.DatastreamProducerRecordBuilder;
+import com.linkedin.datastream.server.api.transport.TransportProvider;
 
-
-import com.linkedin.datastream.server.api.transport.buffered.AbstractBatchBuilder;
-import com.linkedin.datastream.server.api.transport.buffered.AbstractBufferedTransportProvider;
+import static com.linkedin.datastream.server.api.transport.buffered.AbstractBufferedTransportProvider.KAFKA_ORIGIN_CLUSTER;
+import static com.linkedin.datastream.server.api.transport.buffered.AbstractBufferedTransportProvider.KAFKA_ORIGIN_OFFSET;
+import static com.linkedin.datastream.server.api.transport.buffered.AbstractBufferedTransportProvider.KAFKA_ORIGIN_PARTITION;
+import static com.linkedin.datastream.server.api.transport.buffered.AbstractBufferedTransportProvider.KAFKA_ORIGIN_TOPIC;
 
 /**
  * This is a Bigquery Transport provider that writes events to specified bigquery table.
  */
-public class BigqueryTransportProvider extends AbstractBufferedTransportProvider {
+public class BigqueryTransportProvider implements TransportProvider {
 
     private static final Logger LOG = LoggerFactory.getLogger(BigqueryTransportProvider.class.getName());
 
@@ -62,44 +66,50 @@ public class BigqueryTransportProvider extends AbstractBufferedTransportProvider
             .optionalString("eventValueString")
             .endRecord();
 
-    private final BigqueryBatchCommitter _committer;
-    private final int _maxBatchAge;
+    private final BigqueryBufferedTransportProvider _bufferedTransportProvider;
     private final Serializer _valueSerializer;
     private final Deserializer _valueDeserializer;
+    private final BigqueryDatastreamConfiguration _datastreamConfiguration;
+    private final Map<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> _destinationConfigurations;
+    private final Set<BigqueryDatastreamDestination> _destinations;
 
-    private BigqueryTransportProvider(final BigqueryTransportProviderBuilder builder) {
-        super(builder._transportProviderName, builder._batchBuilders);
-        _committer = builder._committer;
-        _maxBatchAge = builder._maxBatchAge;
-        _valueSerializer = builder._valueSerializer;
-        _valueDeserializer = builder._valueDeserializer;
-        init();
-    }
-
-    private void init() {
-        for (AbstractBatchBuilder batchBuilder : _batchBuilders) {
-            batchBuilder.start();
-        }
-
-        // send periodic flush signal to commit stale objects
-        _scheduler.scheduleAtFixedRate(
-                () -> {
-                    for (AbstractBatchBuilder objectBuilder: _batchBuilders) {
-                        LOG.info("Try flush signal sent.");
-                        objectBuilder.assign(new com.linkedin.datastream.common.Package.PackageBuilder().buildTryFlushSignalPackage());
-                    }
-                },
-                _maxBatchAge / 2,
-                _maxBatchAge / 2,
-                TimeUnit.MILLISECONDS);
+    /**
+     * Constructor.
+     * @param bufferedTransportProvider a BigqueryBufferedTransportProvider
+     * @param valueSerializer a Serializer
+     * @param valueDeserializer a Deserializer
+     * @param datastreamConfiguration a BigqueryDatastreamConfiguration
+     * @param destinationConfigurations a mapping of BigqueryDatastreamDestination to BigqueryDatastreamConfiguration
+     */
+    public BigqueryTransportProvider(final BigqueryBufferedTransportProvider bufferedTransportProvider,
+                                     final Serializer valueSerializer,
+                                     final Deserializer valueDeserializer,
+                                     final BigqueryDatastreamConfiguration datastreamConfiguration,
+                                     final Map<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> destinationConfigurations) {
+        _bufferedTransportProvider = bufferedTransportProvider;
+        _valueSerializer = valueSerializer;
+        _valueDeserializer = valueDeserializer;
+        _datastreamConfiguration = datastreamConfiguration;
+        _destinationConfigurations = destinationConfigurations;
+        _destinations = new HashSet<>();
     }
 
     @Override
     public void send(final String destination, final DatastreamProducerRecord record, final SendCallback onComplete) {
-        super.send(destination, record, ((metadata, exception) -> {
-            if (exception == null) {
-                onComplete.onCompletion(metadata, null);
-            } else if (exception instanceof DatastreamTransientException) {
+        final BigqueryDatastreamDestination datastreamDestination = BigqueryDatastreamDestination.parse(destination);
+        registerConfigurationForDestination(datastreamDestination, _datastreamConfiguration);
+        final SendCallback callbackHandler = _datastreamConfiguration.getExceptionsTableConfiguration()
+                .map(ec -> exceptionHandlingCallbackHandler(datastreamDestination, record, onComplete, ec))
+                .orElse(onComplete);
+        _bufferedTransportProvider.send(destination, record, callbackHandler);
+    }
+
+    private SendCallback exceptionHandlingCallbackHandler(final BigqueryDatastreamDestination datastreamDestination,
+                                                          final DatastreamProducerRecord record,
+                                                          final SendCallback onComplete,
+                                                          final BigqueryDatastreamConfiguration config) {
+        return (metadata, exception) -> {
+            if (exception == null || exception instanceof DatastreamTransientException) {
                 onComplete.onCompletion(metadata, exception);
             } else {
                 final DatastreamProducerRecord exceptionRecord;
@@ -110,11 +120,54 @@ public class BigqueryTransportProvider extends AbstractBufferedTransportProvider
                     onComplete.onCompletion(metadata, e);
                     return;
                 }
+                final BigqueryDatastreamDestination exceptionDestination = new BigqueryDatastreamDestination(
+                        datastreamDestination.getProjectId(),
+                        datastreamDestination.getDatasetId(),
+                        getExceptionsDestinationName(datastreamDestination.getDestinatonName())
+                );
+                registerConfigurationForDestination(exceptionDestination, config);
                 // Send an exception record
-                super.send(destination, exceptionRecord, (exceptionRecordMetadata, exceptionRecordException) ->
-                        onComplete.onCompletion(metadata, exceptionRecordException));
+                _bufferedTransportProvider.send(exceptionDestination.toString(), exceptionRecord,
+                        (exceptionRecordMetadata, exceptionRecordException) ->
+                            onComplete.onCompletion(metadata,
+                                    // Call the callback with the original exception if an exception is encountered
+                                    // while trying to insert an exception record
+                                    Optional.ofNullable(exceptionRecordException).map(e -> exception).orElse(null)
+                            )
+                );
             }
-        }));
+        };
+    }
+
+    private void registerConfigurationForDestination(final BigqueryDatastreamDestination destination, final BigqueryDatastreamConfiguration configuration) {
+        if (_destinations.add(destination)) {
+            _destinationConfigurations.put(destination, configuration);
+        }
+    }
+
+    BigqueryDatastreamConfiguration getDatastreamConfiguration() {
+        return _datastreamConfiguration;
+    }
+
+    Set<BigqueryDatastreamDestination> getDestinations() {
+        return Collections.unmodifiableSet(_destinations);
+    }
+
+    @Override
+    public void close() {
+    }
+
+    @Override
+    public void flush() {
+        _bufferedTransportProvider.flush();
+    }
+
+    private static String getExceptionsDestinationName(final String destinationName) {
+        return destinationName + "_exceptions";
+    }
+
+    private static String getExceptionsTopicName(final String topicName) {
+        return topicName + "_exceptions";
     }
 
     private DatastreamProducerRecord createExceptionRecord(final DatastreamProducerRecord record, final Exception exception) {
@@ -127,7 +180,7 @@ public class BigqueryTransportProvider extends AbstractBufferedTransportProvider
 
         final BigqueryExceptionType exceptionType = classifyException(exception);
         final String exceptionClassName = exception.getClass().getName();
-        final String exceptionMessage = exception.getMessage();
+        final String exceptionMessage = Optional.ofNullable(exception.getMessage()).orElse("");
         final String exceptionStackTrace = ExceptionUtils.getStackTrace(exception);
         record.getEventsSendTimestamp().ifPresent(exceptionRecordBuilder::setEventsSendTimestamp);
         record.getEvents().stream().map(event -> {
@@ -161,7 +214,7 @@ public class BigqueryTransportProvider extends AbstractBufferedTransportProvider
             final byte[] exceptionRecordBytes = _valueSerializer.serialize("brooklin-bigquery-transport-exceptions", exceptionAvroRecordBuilder.build());
             final Map<String, String> exceptionRecordMetadata = new HashMap<>(5);
             exceptionRecordMetadata.put(KAFKA_ORIGIN_CLUSTER, cluster);
-            exceptionRecordMetadata.put(KAFKA_ORIGIN_TOPIC, topic + "_exceptions");
+            exceptionRecordMetadata.put(KAFKA_ORIGIN_TOPIC, getExceptionsTopicName(topic));
             exceptionRecordMetadata.put(KAFKA_ORIGIN_PARTITION, partition);
             exceptionRecordMetadata.put(KAFKA_ORIGIN_OFFSET, offset);
             exceptionRecordMetadata.put(BrooklinEnvelopeMetadataConstants.EVENT_TIMESTAMP, eventTimestamp);
@@ -185,86 +238,5 @@ public class BigqueryTransportProvider extends AbstractBufferedTransportProvider
         }
         return exceptionType;
     }
-
-    @Override
-    protected void shutdownCommitter() {
-        _committer.shutdown();
-    }
-
-    /**
-     * Builder class for {@link com.linkedin.datastream.bigquery.BigqueryTransportProvider}
-     */
-    public static class BigqueryTransportProviderBuilder {
-        private String _transportProviderName;
-        private int _maxBatchAge;
-        private BigqueryBatchCommitter _committer;
-        private List<BatchBuilder> _batchBuilders;
-        private Serializer _valueSerializer;
-        private Deserializer _valueDeserializer;
-
-        /**
-         * Set the name of the transport provider
-         */
-        public BigqueryTransportProviderBuilder setTransportProviderName(String transportProviderName) {
-            this._transportProviderName = transportProviderName;
-            return this;
-        }
-
-        /**
-         * Set max batch age
-         */
-        public BigqueryTransportProviderBuilder setMaxBatchAge(int maxBatchAge) {
-            this._maxBatchAge = maxBatchAge;
-            return this;
-        }
-
-        /**
-         * Set batch committer
-         */
-        public BigqueryTransportProviderBuilder setCommitter(BigqueryBatchCommitter committer) {
-            this._committer = committer;
-            return this;
-        }
-
-        /**
-         * Set the batch builders
-         * @param batchBuilders a list of BatchBuilder objects
-         * @return the Builder
-         */
-        public BigqueryTransportProviderBuilder setBatchBuilders(final List<BatchBuilder> batchBuilders) {
-            this._batchBuilders = batchBuilders;
-            return this;
-        }
-
-        /**
-         * Set the value serializer.
-         * @param valueSerializer the Serializer
-         * @return the Builder
-         */
-        public BigqueryTransportProviderBuilder setValueSerializer(final Serializer valueSerializer) {
-            this._valueSerializer = valueSerializer;
-            return this;
-        }
-
-        /**
-         * Set the value deserializer.
-         * @param valueDeserializer the Deserializer
-         * @return the Builder
-         */
-        public BigqueryTransportProviderBuilder setValueDeserializer(final Deserializer valueDeserializer) {
-            this._valueDeserializer = valueDeserializer;
-            return this;
-        }
-
-        /**
-         * Build the BigqueryTransportProvider.
-         * @return
-         *   BigqueryTransportProvider that is created.
-         */
-        public BigqueryTransportProvider build() {
-            return new BigqueryTransportProvider(this);
-        }
-    }
-
 
 }

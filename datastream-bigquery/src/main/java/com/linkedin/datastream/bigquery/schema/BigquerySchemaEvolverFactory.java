@@ -23,7 +23,15 @@ public class BigquerySchemaEvolverFactory {
      */
     public static BigquerySchemaEvolver createBigquerySchemaEvolver(final VerifiableProperties properties) {
         final String schemaEvolverTypeStr = properties.getString("type", BigquerySchemaEvolverType.noop.name());
-        final BigquerySchemaEvolverType schemaEvolverType = BigquerySchemaEvolverType.valueOf(schemaEvolverTypeStr);
+        return createBigquerySchemaEvolver(BigquerySchemaEvolverType.valueOf(schemaEvolverTypeStr));
+    }
+
+    /**
+     * Factory method to create a BigquerySchemaEvolver based on the BigquerySchemaEvolverType
+     * @param schemaEvolverType a BigquerySchemaEvolverType
+     * @return the BigquerySchemaEvolver
+     */
+    public static BigquerySchemaEvolver createBigquerySchemaEvolver(final BigquerySchemaEvolverType schemaEvolverType) {
         final BigquerySchemaEvolver schemaEvolver;
         switch (schemaEvolverType) {
             case simple:

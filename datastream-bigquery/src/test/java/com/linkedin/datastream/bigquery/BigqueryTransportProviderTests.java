@@ -21,7 +21,6 @@ import com.google.cloud.bigquery.TableInfo;
 import com.google.cloud.bigquery.TimePartitioning;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolver;
 import com.linkedin.datastream.bigquery.schema.SimpleBigquerySchemaEvolver;
 import com.linkedin.datastream.bigquery.translator.RecordTranslator;
 import com.linkedin.datastream.bigquery.translator.SchemaTranslator;
@@ -52,6 +51,7 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.Collections;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -70,8 +70,6 @@ import static com.linkedin.datastream.server.api.transport.buffered.AbstractBuff
 import static com.linkedin.datastream.server.api.transport.buffered.AbstractBufferedTransportProvider.KAFKA_ORIGIN_OFFSET;
 import static com.linkedin.datastream.server.api.transport.buffered.AbstractBufferedTransportProvider.KAFKA_ORIGIN_PARTITION;
 import static com.linkedin.datastream.server.api.transport.buffered.AbstractBufferedTransportProvider.KAFKA_ORIGIN_TOPIC;
-import static org.mockito.Matchers.eq;
-import static org.mockito.Matchers.isNull;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -110,21 +108,25 @@ public class BigqueryTransportProviderTests {
                     return builder.build();
                 }).collect(Collectors.toList());
 
-        final BigqueryBatchCommitter committer = new BigqueryBatchCommitter(bigQuery, 1);
+
+        final String projectId = "projectId";
+        final String datasetName = getUniqueDatasetName();
+        final String cluster = "kafka://test";
+        final String topicName = getUniqueTopicName();
+        final String tableName = BigqueryBatchCommitter.sanitizeTableName(topicName);
+        final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination(projectId, datasetName, tableName);
+        final Map<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> destConfigs = new HashMap<>();
+        final BigqueryDatastreamConfiguration config = new BigqueryDatastreamConfiguration(new SimpleBigquerySchemaEvolver(), true);
+        destConfigs.put(destination, config);
+
+        final BigqueryBatchCommitter committer = new BigqueryBatchCommitter(bigQuery, 1, destConfigs);
         final BatchBuilder batchBuilder = new BatchBuilder(
-                maxBatchSize, maxBatchAge, maxInflightCommits, committer, queueSize, valueDeserializer, schemaEvolvers,
-                defaultSchemaEvolverName
+                maxBatchSize, maxBatchAge, maxInflightCommits, committer, queueSize, valueDeserializer, destConfigs
         );
         final List<BatchBuilder> batchBuilders = ImmutableList.of(batchBuilder);
 
-        final String datasetName = getUniqueDatasetName();
-        final long retention = -1;
-        final String destination = String.format("%s/%s", datasetName, retention);
-        final String cluster = "kafka://test";
-        final String topicName = getUniqueTopicName();
-
-        final TableId tableId = TableId.of(datasetName, topicName);
-        final TableId insertTableId = TableId.of(tableId.getDataset(),
+        final TableId tableId = TableId.of(projectId, datasetName, tableName);
+        final TableId insertTableId = TableId.of(projectId, tableId.getDataset(),
                 String.format("%s$%s", tableId.getTable(), LocalDate.now(ZoneOffset.UTC).format(DateTimeFormatter.ofPattern("yyyyMMdd"))));
 
         final InsertAllResponse insertAllResponse = mock(InsertAllResponse.class);
@@ -132,15 +134,11 @@ public class BigqueryTransportProviderTests {
         when(bigQuery.insertAll(any(InsertAllRequest.class))).thenReturn(insertAllResponse);
 
         final DateTime eventTimestamp = new DateTime(new Date(System.currentTimeMillis()));
-        try (final BigqueryTransportProvider transportProvider = new BigqueryTransportProvider.BigqueryTransportProviderBuilder()
-                .setTransportProviderName("test")
-                .setBatchBuilders(batchBuilders)
-                .setCommitter(committer)
-                .setMaxBatchAge(maxBatchAge)
-                .setValueSerializer(valueSerializer)
-                .setValueDeserializer(valueDeserializer)
-                .build()) {
-            sendEvents(transportProvider, destination, cluster, topicName, 0, events, eventTimestamp, null);
+
+        try (final BigqueryTransportProvider transportProvider = new BigqueryTransportProvider(
+                new BigqueryBufferedTransportProvider("test", batchBuilders, committer, maxBatchAge),
+                valueSerializer, valueDeserializer, config, destConfigs)) {
+            sendEvents(transportProvider, destination.toString(), cluster, topicName, 0, events, eventTimestamp, null);
         }
 
         final ArgumentCaptor<InsertAllRequest> requestArgumentCaptor = ArgumentCaptor.forClass(InsertAllRequest.class);
@@ -161,7 +159,8 @@ public class BigqueryTransportProviderTests {
         return RecordTranslator.translate(expectedRecord, (TableRow) actualRow.getContent().get("__metadata"));
     }
 
-    private static InsertAllRequest getExpectedRequest(final InsertAllRequest actualRequest, final TableId insertTableId, final List<GenericRecord> expectedRecords) {
+    private static InsertAllRequest getExpectedRequest(final InsertAllRequest actualRequest, final TableId insertTableId,
+                                                       final List<GenericRecord> expectedRecords) {
         assertEquals(actualRequest.getRows().size(), expectedRecords.size());
         return InsertAllRequest.of(insertTableId, IntStream.range(0, expectedRecords.size())
                 .mapToObj(index -> getExpectedRowToInsert(actualRequest.getRows().get(index), expectedRecords.get(index)))
@@ -204,30 +203,28 @@ public class BigqueryTransportProviderTests {
                     return builder.build();
                 }).collect(Collectors.toList());
 
-        final BigqueryBatchCommitter committer = new BigqueryBatchCommitter(bigQuery, 1);
-
-        final BatchBuilder batchBuilder = new BatchBuilder(
-                maxBatchSize, maxBatchAge, maxInflightCommits, committer, queueSize, valueDeserializer, schemaEvolvers,
-                defaultSchemaEvolverName
-        );
-        final List<BatchBuilder> batchBuilders = ImmutableList.of(batchBuilder);
-
+        final String projectId = "projectId";
         final String datasetName = getUniqueDatasetName();
-        final long retention = -1;
-        final String destination = String.format("%s/%s", datasetName, retention);
         final String cluster = "kafka://test";
         final String topicName = getUniqueTopicName();
+        final String tableName = BigqueryBatchCommitter.sanitizeTableName(topicName);
+        final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination(projectId, datasetName, tableName);
+        final BigqueryDatastreamConfiguration config = new BigqueryDatastreamConfiguration(new SimpleBigquerySchemaEvolver(), true);
+        final Map<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> destConfigs = new HashMap<>();
+        destConfigs.put(destination, new BigqueryDatastreamConfiguration(new SimpleBigquerySchemaEvolver(), true));
 
-        final TableId tableId = TableId.of(datasetName, topicName);
-        final TableId insertTableId = TableId.of(tableId.getDataset(),
-                String.format("%s$%s", tableId.getTable(), LocalDate.now(ZoneOffset.UTC).format(DateTimeFormatter.ofPattern("yyyyMMdd"))));
+        final BigqueryBatchCommitter committer = new BigqueryBatchCommitter(bigQuery, 1, destConfigs);
+        final BatchBuilder batchBuilder = new BatchBuilder(
+                maxBatchSize, maxBatchAge, maxInflightCommits, committer, queueSize, valueDeserializer, destConfigs
+        );
+        final List<BatchBuilder> batchBuilders = ImmutableList.of(batchBuilder);
+        final TableId tableId = TableId.of(projectId, datasetName, topicName);
 
         final com.google.cloud.bigquery.Schema firstSchema = SchemaTranslator.translate(schema1);
         final TableDefinition tableDefinition = StandardTableDefinition.newBuilder()
                 .setSchema(firstSchema)
                 .setTimePartitioning(TimePartitioning.of(TimePartitioning.Type.DAY))
                 .build();
-        final TableInfo tableInfo = TableInfo.newBuilder(tableId, tableDefinition).build();
 
         final Table mockedTable = mock(Table.class);
         when(mockedTable.getDefinition()).thenReturn(tableDefinition);
@@ -235,7 +232,7 @@ public class BigqueryTransportProviderTests {
         final Table.Builder tableBuilder = mock(Table.Builder.class);
         when(mockedTable.toBuilder()).thenReturn(tableBuilder);
         final TableDefinition evolvedTableDefinition = StandardTableDefinition.newBuilder()
-                .setSchema(schemaEvolvers.get(defaultSchemaEvolverName).evolveSchema(firstSchema, SchemaTranslator.translate(schema2)))
+                .setSchema(config.getSchemaEvolver().evolveSchema(firstSchema, SchemaTranslator.translate(schema2)))
                 .setTimePartitioning(TimePartitioning.of(TimePartitioning.Type.DAY))
                 .build();
         when(tableBuilder.setDefinition(evolvedTableDefinition)).thenReturn(tableBuilder);
@@ -249,9 +246,6 @@ public class BigqueryTransportProviderTests {
             final InsertAllRequest request = invocation.getArgumentAt(0, InsertAllRequest.class);
             if (request.getRows().stream().anyMatch(row -> row.getContent().containsKey("new_message"))) {
                 if (tableUpdated.get()) {
-                    //request.getRows().stream().map(row -> row.getContent().entrySet().stream()
-                    //                        .filter(entry -> !"__metadata".equals(entry.getKey()))
-                    //                        .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue))
                     request.getRows().forEach(row -> insertedData.add(row.getContent().entrySet().stream()
                             .filter(entry -> !"__metadata".equals(entry.getKey()))
                             .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue))));
@@ -279,21 +273,16 @@ public class BigqueryTransportProviderTests {
             }
         });
 
-        try (final BigqueryTransportProvider transportProvider = new BigqueryTransportProvider.BigqueryTransportProviderBuilder()
-                .setTransportProviderName("test")
-                .setBatchBuilders(batchBuilders)
-                .setCommitter(committer)
-                .setMaxBatchAge(maxBatchAge)
-                .setValueSerializer(valueSerializer)
-                .setValueDeserializer(valueDeserializer)
-                .build()) {
+        try (final BigqueryTransportProvider transportProvider = new BigqueryTransportProvider(
+                new BigqueryBufferedTransportProvider("test", batchBuilders, committer, maxBatchAge),
+                valueSerializer, valueDeserializer, config, destConfigs)) {
             final DateTime eventTimestamp1 = new DateTime(new Date(System.currentTimeMillis()));
-            sendEvents(transportProvider, destination, cluster, topicName, 0, events1, eventTimestamp1, null);
+            sendEvents(transportProvider, destination.toString(), cluster, topicName, 0, events1, eventTimestamp1, null);
 
             verify(bigQuery, atLeastOnce()).insertAll(any(InsertAllRequest.class));
 
             final DateTime eventTimestamp2 = new DateTime(new Date(System.currentTimeMillis()));
-            sendEvents(transportProvider, destination, cluster, topicName, 0, events2, eventTimestamp2, null);
+            sendEvents(transportProvider, destination.toString(), cluster, topicName, 0, events2, eventTimestamp2, null);
 
             verify(evolvedTable).update();
             verify(bigQuery, atLeastOnce()).insertAll(any(InsertAllRequest.class));
@@ -316,21 +305,24 @@ public class BigqueryTransportProviderTests {
                 .mapToObj(i -> new GenericRecordBuilder(schema).set("message", "payload " + i).build())
                 .collect(Collectors.toList());
 
-        final BigqueryBatchCommitter committer = new BigqueryBatchCommitter(bigQuery, 1);
+        final String projectId = "projectId";
+        final String datasetName = getUniqueDatasetName();
+        final String cluster = "kafka://test";
+        final String topicName = getUniqueTopicName();
+        final String tableName = BigqueryBatchCommitter.sanitizeTableName(topicName);
+        final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination(projectId, datasetName, tableName);
+        final Map<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> destConfigs = new HashMap<>();
+        final BigqueryDatastreamConfiguration config = new BigqueryDatastreamConfiguration(new SimpleBigquerySchemaEvolver(), true);
+        destConfigs.put(destination, config);
+
+        final BigqueryBatchCommitter committer = new BigqueryBatchCommitter(bigQuery, 1, destConfigs);
         final BatchBuilder batchBuilder = new BatchBuilder(
-                maxBatchSize, maxBatchAge, maxInflightCommits, committer, queueSize, valueDeserializer, schemaEvolvers,
-                defaultSchemaEvolverName
+                maxBatchSize, maxBatchAge, maxInflightCommits, committer, queueSize, valueDeserializer, destConfigs
         );
         final List<BatchBuilder> batchBuilders = ImmutableList.of(batchBuilder);
 
-        final String datasetName = getUniqueDatasetName();
-        final long retention = -1;
-        final String destination = String.format("%s/%s", datasetName, retention);
-        final String cluster = "kafka://test";
-        final String topicName = getUniqueTopicName();
-
-        final TableId tableId = TableId.of(datasetName, topicName);
-        final TableId insertTableId = TableId.of(tableId.getDataset(),
+        final TableId tableId = TableId.of(projectId, datasetName, topicName);
+        final TableId insertTableId = TableId.of(tableId.getProject(), tableId.getDataset(),
                 String.format("%s$%s", tableId.getTable(), LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"))));
 
         final TableDefinition tableDefinition = StandardTableDefinition.newBuilder()
@@ -342,7 +334,7 @@ public class BigqueryTransportProviderTests {
         when(mockedTable.getDefinition()).thenReturn(tableDefinition);
         when(bigQuery.getTable(tableId)).thenReturn(mockedTable);
 
-        final TableId exceptionsTableId = TableId.of(datasetName, topicName + "_exceptions");
+        final TableId exceptionsTableId = TableId.of(projectId, datasetName, topicName + "_exceptions");
 
         final TableDefinition exceptionsTableDefinition = StandardTableDefinition.newBuilder()
                 .setSchema(SchemaTranslator.translate(BigqueryTransportProvider.EXCEPTION_RECORD_SCHEMA))
@@ -359,15 +351,11 @@ public class BigqueryTransportProviderTests {
 
         final DateTime eventTimestamp = new DateTime(new Date(System.currentTimeMillis()));
         final List<Exception> callbackExceptions = new LinkedList<>();
-        try (final BigqueryTransportProvider transportProvider = new BigqueryTransportProvider.BigqueryTransportProviderBuilder()
-             .setTransportProviderName("test")
-             .setBatchBuilders(batchBuilders)
-             .setCommitter(committer)
-             .setMaxBatchAge(maxBatchAge)
-             .setValueSerializer(valueSerializer)
-             .setValueDeserializer(valueDeserializer)
-             .build()) {
-            sendEvents(transportProvider, destination, cluster, topicName, 0, events, eventTimestamp, (metadata, exception) -> {
+
+        try (final BigqueryTransportProvider transportProvider = new BigqueryTransportProvider(
+                new BigqueryBufferedTransportProvider("test", batchBuilders, committer, maxBatchAge),
+                valueSerializer, valueDeserializer, config, destConfigs)) {
+            sendEvents(transportProvider, destination.toString(), cluster, topicName, 0, events, eventTimestamp, (metadata, exception) -> {
                 if (exception != null) {
                     callbackExceptions.add(exception);
                 }
@@ -411,22 +399,25 @@ public class BigqueryTransportProviderTests {
                         .set("message", "payload " + i).build())
                 .collect(Collectors.toList());
 
-        final BigqueryBatchCommitter committer = new BigqueryBatchCommitter(bigQuery, 1);
+        final String projectId = "projectId";
+        final String datasetName = getUniqueDatasetName();
+        final String cluster = "kafka://test";
+        final String topicName = getUniqueTopicName();
+        final String tableName = BigqueryBatchCommitter.sanitizeTableName(topicName);
+        final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination(projectId, datasetName, tableName);
+        final Map<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> destConfigs = new HashMap<>();
+        final BigqueryDatastreamConfiguration config = new BigqueryDatastreamConfiguration(new SimpleBigquerySchemaEvolver(), true,
+                null, null, new BigqueryDatastreamConfiguration(new SimpleBigquerySchemaEvolver(), true));
+        destConfigs.put(destination, config);
 
+        final BigqueryBatchCommitter committer = new BigqueryBatchCommitter(bigQuery, 1, destConfigs);
         final BatchBuilder batchBuilder = new BatchBuilder(
-                maxBatchSize, maxBatchAge, maxInflightCommits, committer, queueSize, valueDeserializer, schemaEvolvers,
-                defaultSchemaEvolverName
+                maxBatchSize, maxBatchAge, maxInflightCommits, committer, queueSize, valueDeserializer, destConfigs
         );
         final List<BatchBuilder> batchBuilders = ImmutableList.of(batchBuilder);
 
-        final String datasetName = getUniqueDatasetName();
-        final long retention = -1;
-        final String destination = String.format("%s/%s", datasetName, retention);
-        final String cluster = "kafka://test";
-        final String topicName = getUniqueTopicName();
-
-        final TableId tableId = TableId.of(datasetName, topicName);
-        final TableId insertTableId = TableId.of(tableId.getDataset(),
+        final TableId tableId = TableId.of(projectId, datasetName, topicName);
+        final TableId insertTableId = TableId.of(tableId.getProject(), tableId.getDataset(),
                 String.format("%s$%s", tableId.getTable(), LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"))));
 
         final com.google.cloud.bigquery.Schema firstSchema = SchemaTranslator.translate(currentSchema);
@@ -440,8 +431,8 @@ public class BigqueryTransportProviderTests {
         when(mockedTable.getDefinition()).thenReturn(tableDefinition);
         when(bigQuery.getTable(tableId)).thenReturn(mockedTable);
 
-        final TableId exceptionsTableId = TableId.of(datasetName, topicName + "_exceptions");
-        final TableId insertExceptionsTableId = TableId.of(tableId.getDataset(),
+        final TableId exceptionsTableId = TableId.of(projectId, datasetName, topicName + "_exceptions");
+        final TableId insertExceptionsTableId = TableId.of(tableId.getProject(), tableId.getDataset(),
                 String.format("%s$%s", exceptionsTableId.getTable(), LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"))));
 
         final TableDefinition exceptionsTableDefinition = StandardTableDefinition.newBuilder()
@@ -489,21 +480,17 @@ public class BigqueryTransportProviderTests {
         final List<DatastreamRecordMetadata> callbackMetadata = new LinkedList<>();
         final List<Exception> callbackExceptions = new LinkedList<>();
 
-        try (final BigqueryTransportProvider transportProvider = new BigqueryTransportProvider.BigqueryTransportProviderBuilder()
-                .setTransportProviderName("test")
-                .setBatchBuilders(batchBuilders)
-                .setCommitter(committer)
-                .setMaxBatchAge(maxBatchAge)
-                .setValueSerializer(valueSerializer)
-                .setValueDeserializer(valueDeserializer)
-                .build()) {
+
+        try (final BigqueryTransportProvider transportProvider = new BigqueryTransportProvider(
+                new BigqueryBufferedTransportProvider("test", batchBuilders, committer, maxBatchAge),
+                valueSerializer, valueDeserializer, config, destConfigs)) {
 
             final DateTime eventTimestamp = new DateTime(new Date(System.currentTimeMillis()));
             final String sourceCheckpoint = "testCheckpoint 1";
             final List<DatastreamProducerRecord> records = incompatibleEvents.stream()
                     .map(event -> createRecord(cluster, topicName, offsetIncrement.getAndIncrement(), 0, event, eventTimestamp, sourceCheckpoint))
                     .collect(Collectors.toList());
-            sendEvents(transportProvider, destination, records, (metadata, exception) -> {
+            sendEvents(transportProvider, destination.toString(), records, (metadata, exception) -> {
                 callbackMetadata.add(metadata);
                 if (exception != null) {
                     callbackExceptions.add(exception);
@@ -545,22 +532,25 @@ public class BigqueryTransportProviderTests {
                         .set("message", "payload " + i).build())
                 .collect(Collectors.toList());
 
-        final BigqueryBatchCommitter committer = new BigqueryBatchCommitter(bigQuery, 1);
+        final String projectId = "projectId";
+        final String datasetName = getUniqueDatasetName();
+        final String cluster = "kafka://test";
+        final String topicName = getUniqueTopicName();
+        final String tableName = BigqueryBatchCommitter.sanitizeTableName(topicName);
+        final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination(projectId, datasetName, tableName);
+        final Map<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> destConfigs = new HashMap<>();
+        final BigqueryDatastreamConfiguration config = new BigqueryDatastreamConfiguration(new SimpleBigquerySchemaEvolver(), true,
+                null, null, new BigqueryDatastreamConfiguration(new SimpleBigquerySchemaEvolver(), true));
+        destConfigs.put(destination, config);
 
+        final BigqueryBatchCommitter committer = new BigqueryBatchCommitter(bigQuery, 1, destConfigs);
         final BatchBuilder batchBuilder = new BatchBuilder(
-                maxBatchSize, maxBatchAge, maxInflightCommits, committer, queueSize, valueDeserializer, schemaEvolvers,
-                defaultSchemaEvolverName
+                maxBatchSize, maxBatchAge, maxInflightCommits, committer, queueSize, valueDeserializer, destConfigs
         );
         final List<BatchBuilder> batchBuilders = ImmutableList.of(batchBuilder);
 
-        final String datasetName = getUniqueDatasetName();
-        final long retention = -1;
-        final String destination = String.format("%s/%s", datasetName, retention);
-        final String cluster = "kafka://test";
-        final String topicName = getUniqueTopicName();
-
-        final TableId tableId = TableId.of(datasetName, topicName);
-        final TableId insertTableId = TableId.of(tableId.getDataset(),
+        final TableId tableId = TableId.of(projectId, datasetName, topicName);
+        final TableId insertTableId = TableId.of(tableId.getProject(), tableId.getDataset(),
                 String.format("%s$%s", tableId.getTable(), LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"))));
 
         final com.google.cloud.bigquery.Schema firstSchema = SchemaTranslator.translate(currentSchema);
@@ -574,8 +564,8 @@ public class BigqueryTransportProviderTests {
         when(mockedTable.getDefinition()).thenReturn(tableDefinition);
         when(bigQuery.getTable(tableId)).thenReturn(mockedTable);
 
-        final TableId exceptionsTableId = TableId.of(datasetName, topicName + "_exceptions");
-        final TableId insertExceptionsTableId = TableId.of(tableId.getDataset(),
+        final TableId exceptionsTableId = TableId.of(projectId, datasetName, topicName + "_exceptions");
+        final TableId insertExceptionsTableId = TableId.of(tableId.getProject(), tableId.getDataset(),
                 String.format("%s$%s", exceptionsTableId.getTable(), LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"))));
 
         final TableDefinition exceptionsTableDefinition = StandardTableDefinition.newBuilder()
@@ -623,21 +613,17 @@ public class BigqueryTransportProviderTests {
         final List<DatastreamRecordMetadata> callbackMetadata = new LinkedList<>();
         final List<Exception> callbackExceptions = new LinkedList<>();
 
-        try (final BigqueryTransportProvider transportProvider = new BigqueryTransportProvider.BigqueryTransportProviderBuilder()
-                .setTransportProviderName("test")
-                .setBatchBuilders(batchBuilders)
-                .setCommitter(committer)
-                .setMaxBatchAge(maxBatchAge)
-                .setValueSerializer(valueSerializer)
-                .setValueDeserializer(valueDeserializer)
-                .build()) {
+
+        try (final BigqueryTransportProvider transportProvider = new BigqueryTransportProvider(
+                new BigqueryBufferedTransportProvider("test", batchBuilders, committer, maxBatchAge),
+                valueSerializer, valueDeserializer, config, destConfigs)) {
 
             final DateTime eventTimestamp = new DateTime(new Date(System.currentTimeMillis()));
             final String sourceCheckpoint = "testCheckpoint 1";
             final List<DatastreamProducerRecord> records = incompatibleEvents.stream()
                     .map(event -> createRecord(cluster, topicName, offsetIncrement.getAndIncrement(), 0, event, eventTimestamp, sourceCheckpoint))
                     .collect(Collectors.toList());
-            sendEvents(transportProvider, destination, records, (metadata, exception) -> {
+            sendEvents(transportProvider, destination.toString(), records, (metadata, exception) -> {
                 callbackMetadata.add(metadata);
                 if (exception != null) {
                     callbackExceptions.add(exception);
@@ -662,8 +648,6 @@ public class BigqueryTransportProviderTests {
     private Deserializer valueDeserializer;
     private Serializer valueSerializer;
     private BigQuery bigQuery;
-    private Map<String, BigquerySchemaEvolver> schemaEvolvers;
-    private String defaultSchemaEvolverName;
 
     @BeforeMethod
     void beforeTest() {
@@ -674,8 +658,6 @@ public class BigqueryTransportProviderTests {
         valueDeserializer = new KafkaDeserializer(new KafkaAvroDeserializer(schemaRegistryClient));
         valueSerializer = new KafkaSerializer(serializer);
         bigQuery = mock(BigQuery.class);
-        defaultSchemaEvolverName = "simple";
-        schemaEvolvers = Collections.singletonMap(defaultSchemaEvolverName, new SimpleBigquerySchemaEvolver());
     }
 
     private void sendEvents(final BigqueryTransportProvider transportProvider, final String destination,

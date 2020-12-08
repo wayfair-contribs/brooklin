@@ -10,7 +10,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
-import com.linkedin.datastream.serde.Deserializer;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.kafka.common.errors.SerializationException;
 
@@ -23,6 +22,7 @@ import com.linkedin.datastream.bigquery.translator.SchemaTranslator;
 import com.linkedin.datastream.common.DatastreamRecordMetadata;
 import com.linkedin.datastream.common.Package;
 import com.linkedin.datastream.metrics.DynamicMetricsManager;
+import com.linkedin.datastream.serde.Deserializer;
 import com.linkedin.datastream.server.api.transport.buffered.AbstractBatch;
 
 /**
@@ -97,17 +97,18 @@ public class Batch extends AbstractBatch {
             }
 
             if (_destination == null) {
-                String[] datasetRetentionTableSuffix = aPackage.getDestination().split("/");
-                if (datasetRetentionTableSuffix.length == 3) {
-                    _destination = datasetRetentionTableSuffix[0] +
-                            "/" + aPackage.getTopic() + datasetRetentionTableSuffix[2] +
-                            "/" + datasetRetentionTableSuffix[1];
-                } else {
-                    _destination = datasetRetentionTableSuffix[0] +
-                            "/" + aPackage.getTopic() +
-                            "/" + datasetRetentionTableSuffix[1];
-                }
-                _committer.setDestTableSchemaEvolver(_destination, _schemaEvolver);
+//                String[] datasetRetentionTableSuffix = aPackage.getDestination().split("/");
+//                if (datasetRetentionTableSuffix.length == 3) {
+//                    _destination = datasetRetentionTableSuffix[0] +
+//                            "/" + aPackage.getTopic() + datasetRetentionTableSuffix[2] +
+//                            "/" + datasetRetentionTableSuffix[1];
+//                } else {
+//                    _destination = datasetRetentionTableSuffix[0] +
+//                            "/" + aPackage.getTopic() +
+//                            "/" + datasetRetentionTableSuffix[1];
+//                }
+//                _committer.setDestTableSchemaEvolver(_destination, _schemaEvolver);
+                _destination = aPackage.getDestination();
             }
 
             final GenericRecord record;
@@ -159,7 +160,7 @@ public class Batch extends AbstractBatch {
         newBQSchema.ifPresent(schema -> {
             _avroSchema = avroSchema;
             _schema = schema;
-            _committer.setDestTableSchema(_destination, _schema);
+            _committer.setDestTableSchema(BigqueryDatastreamDestination.parse(_destination), _schema);
         });
     }
 

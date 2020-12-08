@@ -5,9 +5,11 @@
  */
 package com.linkedin.datastream.bigquery;
 
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -22,8 +24,6 @@ import java.util.stream.IntStream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.google.auth.Credentials;
-import com.google.auth.oauth2.GoogleCredentials;
 import com.google.cloud.bigquery.BigQuery;
 import com.google.cloud.bigquery.BigQueryException;
 import com.google.cloud.bigquery.InsertAllRequest;
@@ -49,8 +49,8 @@ import com.linkedin.datastream.server.api.transport.buffered.CommitCallback;
 public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequest.RowToInsert>> {
     private static final Logger LOG = LoggerFactory.getLogger(BigqueryBatchCommitter.class.getName());
 
-    private final ConcurrentMap<String, Schema> _destTableSchemas;
-    private final ConcurrentMap<String, BigquerySchemaEvolver> _destTableSchemaEvolvers;
+    private final ConcurrentMap<BigqueryDatastreamDestination, Schema> _destTableSchemas;
+    private final Map<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> _datastreamConfigurations;
 
     private final ExecutorService _executor;
 
@@ -58,49 +58,39 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
 
     private final DateTimeFormatter partitionDateFormatter = DateTimeFormatter.ofPattern("yyyyMMdd");
 
-    private static String sanitizeTableName(String tableName) {
-        return tableName.replaceAll("[^A-Za-z0-9_]+", "_");
-    }
-
     /**
      * Constructor.
      * @param bigQuery a BigQuery instance
      * @param numThreads the number of committer threads
      */
-    public BigqueryBatchCommitter(final BigQuery bigQuery, final int numThreads) {
+    public BigqueryBatchCommitter(final BigQuery bigQuery, final int numThreads, final Map<BigqueryDatastreamDestination,
+            BigqueryDatastreamConfiguration> datastreamConfigurations) {
         this._bigquery = bigQuery;
         this._executor = Executors.newFixedThreadPool(numThreads);
         this._destTableSchemas = new ConcurrentHashMap<>();
-        this._destTableSchemaEvolvers = new ConcurrentHashMap<>();
+        _datastreamConfigurations = datastreamConfigurations;
     }
 
-    private synchronized boolean createOrUpdateTable(String destination) {
-        final String[] datasetTableNameRetention = destination.split("/");
-
-        final Schema desiredTableSchema = _destTableSchemas.get(destination);
-
-        final long partitionRetentionDays = Long.parseLong(datasetTableNameRetention[2]);
-        final TimePartitioning timePartitioning;
-        if (partitionRetentionDays > 0) {
-            timePartitioning = TimePartitioning.of(TimePartitioning.Type.DAY, partitionRetentionDays * 86400000L);
-        } else {
-            timePartitioning = TimePartitioning.of(TimePartitioning.Type.DAY);
-        }
-
-        final TableId tableId = TableId.of(datasetTableNameRetention[0], sanitizeTableName(datasetTableNameRetention[1]));
+    private synchronized boolean createOrUpdateTable(final TableId tableId, final Schema desiredTableSchema,
+                                                     final BigquerySchemaEvolver schemaEvolver, final Long partitionExpirationDays) {
+        final TimePartitioning timePartitioning = Optional.ofNullable(partitionExpirationDays)
+                .filter(partitionRetentionDays -> partitionRetentionDays > 0)
+                .map(partitionRetentionDays -> TimePartitioning.of(TimePartitioning.Type.DAY, Duration.of(partitionRetentionDays, ChronoUnit.DAYS).toMillis()))
+                .orElse(TimePartitioning.of(TimePartitioning.Type.DAY));
 
         final Optional<Table> optionalExistingTable = Optional.ofNullable(_bigquery.getTable(tableId));
-        return optionalExistingTable.map(table -> updateTable(destination, desiredTableSchema, timePartitioning, tableId, table))
-                .orElseGet(() -> createTable(destination, desiredTableSchema, timePartitioning, tableId));
+        return optionalExistingTable.map(table -> updateTable(tableId, desiredTableSchema, timePartitioning, table, schemaEvolver))
+                .orElseGet(() -> createTable(tableId, desiredTableSchema, timePartitioning));
     }
 
-    private boolean updateTable(final String destination, final Schema desiredTableSchema,
-                             final TimePartitioning timePartitioning, final TableId tableId, final Table existingTable) {
+    private boolean updateTable(final TableId tableId, final Schema desiredTableSchema,
+                             final TimePartitioning timePartitioning,  final Table existingTable,
+                                final BigquerySchemaEvolver schemaEvolver) {
         final Schema existingTableSchema = Optional.ofNullable(existingTable.getDefinition().getSchema())
                 .orElseThrow(() -> new IllegalStateException(String.format("schema not defined for table: %s", tableId)));
         boolean tableUpdated;
         if (!desiredTableSchema.equals(existingTableSchema)) {
-            final Schema evolvedSchema = _destTableSchemaEvolvers.get(destination).evolveSchema(existingTableSchema, desiredTableSchema);
+            final Schema evolvedSchema = schemaEvolver.evolveSchema(existingTableSchema, desiredTableSchema);
             if (!existingTableSchema.equals(evolvedSchema)) {
                 try {
                     existingTable.toBuilder()
@@ -111,36 +101,36 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
                     final Table currentTable = _bigquery.getTable(tableId);
                     final Schema currentTableSchema = currentTable.getDefinition().getSchema();
                     if (evolvedSchema.equals(currentTableSchema)) {
-                        LOG.info("Schema already evolved for table {}", destination);
+                        LOG.info("Schema already evolved for table {}", tableId);
                         tableUpdated = true;
                     } else if (!existingTableSchema.equals(currentTableSchema)) {
-                        LOG.warn("Concurrent table schema update exception encountered for table {}. Retrying update with new base schema...", destination, e);
-                        tableUpdated = updateTable(destination, desiredTableSchema, timePartitioning, tableId, currentTable);
+                        LOG.warn("Concurrent table schema update exception encountered for table {}. Retrying update with new base schema...", tableId, e);
+                        tableUpdated = updateTable(tableId, desiredTableSchema, timePartitioning, currentTable, schemaEvolver);
                     } else {
-                        LOG.error("Failed to update schema for table {}", destination, e);
+                        LOG.error("Failed to update schema for table {}", tableId, e);
                         throw e;
                     }
                 }
-                LOG.debug("Table {} updated with evolved schema", destination);
+                LOG.debug("Table {} updated with evolved schema", tableId);
             } else {
                 tableUpdated = false;
             }
         } else {
-            LOG.debug("Table {} already exist", destination);
+            LOG.debug("Table {} already exist", tableId);
             tableUpdated = false;
         }
         return tableUpdated;
     }
 
-    private boolean createTable(final String destination, final Schema desiredTableSchema, final TimePartitioning timePartitioning, final TableId tableId) {
+    private boolean createTable(final TableId tableId, final Schema desiredTableSchema, final TimePartitioning timePartitioning) {
         final TableInfo tableInfo = TableInfo.newBuilder(tableId, createTableDefinition(desiredTableSchema, timePartitioning)).build();
         try {
             _bigquery.create(tableInfo);
         } catch (BigQueryException e) {
-            LOG.warn("Failed to create table {}", destination, e);
+            LOG.warn("Failed to create table {}", tableId, e);
             throw e;
         }
-        LOG.info("Table {} created successfully", destination);
+        LOG.info("Table {} created successfully", tableId);
         return true;
     }
 
@@ -156,22 +146,13 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
      * @param dest dataset and table
      * @param schema table schema
      */
-    public void setDestTableSchema(String dest, Schema schema) {
+    public void setDestTableSchema(final BigqueryDatastreamDestination dest, final Schema schema) {
         _destTableSchemas.put(dest, schema);
-    }
-
-    /**
-     * Set the destination table schema evolver.
-     * @param dest the destination
-     * @param schemaEvolver the BigquerySchemaEvolver
-     */
-    public void setDestTableSchemaEvolver(final String dest, final BigquerySchemaEvolver schemaEvolver) {
-        _destTableSchemaEvolvers.put(dest, schemaEvolver);
     }
 
     @Override
     public void commit(List<InsertAllRequest.RowToInsert> batch,
-                       String destination,
+                       final String destinationStr,
                        List<SendCallback> ackCallbacks,
                        List<DatastreamRecordMetadata> recordMetadata,
                        List<Long> sourceTimestamps,
@@ -183,14 +164,19 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
         final Runnable committerTask = () -> {
             final String classSimpleName = this.getClass().getSimpleName();
 
+            final BigqueryDatastreamDestination destination = BigqueryDatastreamDestination.parse(destinationStr);
+            final BigqueryDatastreamConfiguration datastreamConfiguration = Optional.ofNullable(_datastreamConfigurations.get(destination))
+                    .orElseThrow(() -> new IllegalStateException(String.format("configuration not defined for destination: %s", destination)));
+            final String tableName = sanitizeTableName(datastreamConfiguration.getTableNameTemplate()
+                    .map(template -> String.format(template, destination.getDestinatonName()))
+                    .orElse(destination.getDestinatonName()));
+            final TableId tableId = TableId.of(destination.getProjectId(), destination.getDatasetId(), tableName);
             final String partition = partitionDateFormatter.format(LocalDate.now(ZoneOffset.UTC));
-            final String[] datasetTable = destination.split("/");
-            final String tableName = sanitizeTableName(datasetTable[1]);
-            final TableId tableId = TableId.of(datasetTable[0], String.format("%s$%s", tableName, partition));
+            final TableId insertTableId = TableId.of(tableId.getProject(), tableId.getDataset(), String.format("%s$%s", tableId.getTable(), partition));
 
-            LOG.debug("Committing a batch to dataset {} and table {}", datasetTable[0], tableName);
+            LOG.debug("Committing a batch to project {}, dataset {}, and table {}", tableId.getProject(), tableId.getDataset(), tableId.getTable());
 
-            final InsertAllRequest insertAllRequest = InsertAllRequest.newBuilder(tableId, batch).build();
+            final InsertAllRequest insertAllRequest = InsertAllRequest.newBuilder(insertTableId, batch).build();
 
             final long start = System.currentTimeMillis();
             Map<Integer, Exception> insertErrors = insertRowsAndMapErrors(insertAllRequest);
@@ -198,10 +184,11 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
             DynamicMetricsManager.getInstance().createOrUpdateHistogram(classSimpleName, recordMetadata.get(0).getTopic(),
                     "insertAllExecTime", end - start);
 
-            // If we encountered insert errors, try creating/updating the destination table before retrying
-            if (!insertErrors.isEmpty()) {
+            // If we manage the destination table and encountered insert errors, try creating/updating the destination table before retrying
+            if (datastreamConfiguration.isManageDestinationTable() && !insertErrors.isEmpty()) {
                 try {
-                    final boolean tableUpdatedOrCreated = createOrUpdateTable(destination);
+                    final boolean tableUpdatedOrCreated = createOrUpdateTable(tableId, _destTableSchemas.get(destination),
+                            datastreamConfiguration.getSchemaEvolver(), datastreamConfiguration.getPartitionExpirationDays().orElse(null));
                     if (tableUpdatedOrCreated) {
                         LOG.info("Table created/updated for destination {}. Retrying batch...", destination);
                         insertErrors = insertRowsAndMapErrors(insertAllRequest);
@@ -264,6 +251,10 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
             Thread.currentThread().interrupt();
         }
         LOG.info("BQ Batch committer stopped.");
+    }
+
+    static String sanitizeTableName(String tableName) {
+        return tableName.replaceAll("[^A-Za-z0-9_]+", "_");
     }
 
 }

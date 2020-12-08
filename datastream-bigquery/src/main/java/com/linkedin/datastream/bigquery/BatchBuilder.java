@@ -5,18 +5,16 @@
  */
 package com.linkedin.datastream.bigquery;
 
-import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Function;
 
-import com.linkedin.datastream.serde.Deserializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolver;
 import com.linkedin.datastream.common.DatastreamRecordMetadata;
 import com.linkedin.datastream.common.Package;
 import com.linkedin.datastream.metrics.DynamicMetricsManager;
+import com.linkedin.datastream.serde.Deserializer;
 import com.linkedin.datastream.server.api.transport.buffered.AbstractBatch;
 import com.linkedin.datastream.server.api.transport.buffered.AbstractBatchBuilder;
 
@@ -27,7 +25,7 @@ public class BatchBuilder extends AbstractBatchBuilder {
 
     private static final Logger LOG = LoggerFactory.getLogger(BatchBuilder.class.getName());
 
-    private final Function<String, Batch> newBatchSupplier;
+    private final Function<BigqueryDatastreamDestination, Batch> newBatchSupplier;
 
     /**
      * Constructor for BatchBuilder
@@ -37,8 +35,7 @@ public class BatchBuilder extends AbstractBatchBuilder {
      * @param committer committer object.
      * @param queueSize queue size of the batch builder.
      * @param valueDeserializer a Deserializer
-     * @param schemaEvolvers a mapping of schema evolver name to BigquerySchemaEvolver
-     * @param defaultBigquerySchemaEvolverName the name of the default BigquerySchemaEvolver
+     * @param destinationConfigurations a Map of BigqueryDatastreamDestination to BigqueryDatastreamConfiguration
      */
     BatchBuilder(final int maxBatchSize,
                  final int maxBatchAge,
@@ -46,15 +43,14 @@ public class BatchBuilder extends AbstractBatchBuilder {
                  final BigqueryBatchCommitter committer,
                  final int queueSize,
                  final Deserializer valueDeserializer,
-                 final Map<String, BigquerySchemaEvolver> schemaEvolvers,
-                 final String defaultBigquerySchemaEvolverName) {
+                 final Map<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> destinationConfigurations) {
         super(queueSize);
-        newBatchSupplier = topicAndPartition -> new Batch(maxBatchSize,
+        newBatchSupplier = destination -> new Batch(maxBatchSize,
                 maxBatchAge,
                 maxInflightCommits,
                 valueDeserializer,
                 committer,
-                schemaEvolvers.get(defaultBigquerySchemaEvolverName)
+                destinationConfigurations.get(destination).getSchemaEvolver()
         );
     }
 
@@ -72,7 +68,8 @@ public class BatchBuilder extends AbstractBatchBuilder {
 
             try {
                 if (aPackage.isDataPackage()) {
-                    _registry.computeIfAbsent(aPackage.getTopic() + "-" + aPackage.getPartition(), newBatchSupplier)
+                    _registry.computeIfAbsent(aPackage.getTopic() + "-" + aPackage.getPartition(),
+                            topicAndPartition -> newBatchSupplier.apply(BigqueryDatastreamDestination.parse(aPackage.getDestination())))
                             .write(aPackage);
                 } else {
                     // broadcast signal

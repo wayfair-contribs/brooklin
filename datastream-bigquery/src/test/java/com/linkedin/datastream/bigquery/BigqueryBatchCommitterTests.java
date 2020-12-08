@@ -22,16 +22,15 @@ import com.google.cloud.bigquery.TableInfo;
 import com.google.cloud.bigquery.TimePartitioning;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
 import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolver;
 import com.linkedin.datastream.bigquery.schema.SimpleBigquerySchemaEvolver;
 import com.linkedin.datastream.common.DatastreamRecordMetadata;
-import com.linkedin.datastream.common.DatastreamTransientException;
 import com.linkedin.datastream.common.SendCallback;
 import com.linkedin.datastream.metrics.DynamicMetricsManager;
+import com.linkedin.datastream.server.Pair;
 import com.linkedin.datastream.server.api.transport.buffered.CommitCallback;
 import org.mockito.ArgumentCaptor;
-import org.mockito.stubbing.Answer;
-import org.mockito.stubbing.OngoingStubbing;
 import org.testng.annotations.BeforeClass;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
@@ -39,13 +38,23 @@ import org.testng.annotations.Test;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.HashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 import static org.mockito.Mockito.*;
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertTrue;
+import static org.testng.Assert.assertFalse;
 
 public class BigqueryBatchCommitterTests {
 
@@ -57,24 +66,25 @@ public class BigqueryBatchCommitterTests {
     private BigQuery bigQuery;
     private BigqueryBatchCommitter batchCommitter;
     private BigquerySchemaEvolver schemaEvolver;
+    private Map<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> destinationConfiguraitons;
 
     @BeforeMethod
     void beforeTest() {
         bigQuery = mock(BigQuery.class);
         schemaEvolver = new SimpleBigquerySchemaEvolver();
-        batchCommitter = new BigqueryBatchCommitter(bigQuery, 1);
+        destinationConfiguraitons = new HashMap<>();
+        batchCommitter = new BigqueryBatchCommitter(bigQuery, 1, destinationConfiguraitons);
     }
 
     @Test
     public void testCreateTableOnCommit() throws InterruptedException {
-        final TableId tableId = TableId.of("dataset_name", "table_name");
-        final long retention = -1L;
-        final String destination = String.join("/", tableId.getDataset(), tableId.getTable(), Long.toString(retention));
+        final TableId tableId = TableId.of("project_name", "dataset_name", "table_name");
+        final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination(tableId.getProject(), tableId.getDataset(), tableId.getTable());
+        destinationConfiguraitons.put(destination, new BigqueryDatastreamConfiguration(schemaEvolver, true));
         final Schema schema = Schema.of(
                 Field.of("string", StandardSQLTypeName.STRING),
                 Field.of("int", StandardSQLTypeName.INT64)
         );
-        batchCommitter.setDestTableSchemaEvolver(destination, schemaEvolver);
         batchCommitter.setDestTableSchema(destination, schema);
 
         when(bigQuery.getTable(tableId)).thenReturn(null);
@@ -92,7 +102,7 @@ public class BigqueryBatchCommitterTests {
                         "int", 123
                 ))
         );
-        final TableId insertTableId = TableId.of(tableId.getDataset(),
+        final TableId insertTableId = TableId.of(tableId.getProject(), tableId.getDataset(),
                 String.format("%s$%s", tableId.getTable(), LocalDate.now(ZoneOffset.UTC).format(DateTimeFormatter.ofPattern("yyyyMMdd"))));
         final InsertAllRequest insertAllRequest = InsertAllRequest.of(insertTableId, rowsToInsert);
         final BigQueryException bigqueryException = new BigQueryException(404, "Table not found", new BigQueryError("notFound", null, "Table not found"));
@@ -124,7 +134,7 @@ public class BigqueryBatchCommitterTests {
                 new DatastreamRecordMetadata("test", "test", 0)
         );
         final ImmutableList<Long> timestamps = ImmutableList.of(System.currentTimeMillis());
-        batchCommitter.commit(rowsToInsert, destination, callbacks, metadata, timestamps, commitCallback);
+        batchCommitter.commit(rowsToInsert, destination.toString(), callbacks, metadata, timestamps, commitCallback);
 
         latch.await(1, TimeUnit.SECONDS);
 
@@ -136,14 +146,13 @@ public class BigqueryBatchCommitterTests {
 
     @Test
     public void testCreateTableFailure() throws InterruptedException {
-        final TableId tableId = TableId.of("dataset_name", "table_name");
-        final long retention = -1L;
-        final String destination = String.join("/", tableId.getDataset(), tableId.getTable(), Long.toString(retention));
+        final TableId tableId = TableId.of("project_name", "dataset_name", "table_name");
+        final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination(tableId.getProject(), tableId.getDataset(), tableId.getTable());
+        destinationConfiguraitons.put(destination, new BigqueryDatastreamConfiguration(schemaEvolver, true));
         final Schema schema = Schema.of(
                 Field.of("string", StandardSQLTypeName.STRING),
                 Field.of("int", StandardSQLTypeName.INT64)
         );
-        batchCommitter.setDestTableSchemaEvolver(destination, schemaEvolver);
         batchCommitter.setDestTableSchema(destination, schema);
 
         when(bigQuery.getTable(tableId)).thenReturn(null);
@@ -171,7 +180,7 @@ public class BigqueryBatchCommitterTests {
         when(bigQuery.create(tableInfo)).thenThrow(exception);
         final SendCallback sendCallback = mock(SendCallback.class);
         final DatastreamRecordMetadata metadata = new DatastreamRecordMetadata("test", "test", 0);
-        batchCommitter.commit(rowsToInsert, destination, ImmutableList.of(sendCallback), ImmutableList.of(metadata),
+        batchCommitter.commit(rowsToInsert, destination.toString(), ImmutableList.of(sendCallback), ImmutableList.of(metadata),
                 ImmutableList.of(), commitCallback);
         latch.await(1, TimeUnit.SECONDS);
 
@@ -184,17 +193,74 @@ public class BigqueryBatchCommitterTests {
         assertEquals(actualException, exception);
     }
 
+
+    @Test
+    public void testTableNotCreatedWhenNotManaged() throws InterruptedException {
+        final TableId tableId = TableId.of("project_name", "dataset_name", "table_name");
+        final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination(tableId.getProject(), tableId.getDataset(), tableId.getTable());
+        destinationConfiguraitons.put(destination, new BigqueryDatastreamConfiguration(schemaEvolver, false));
+        final Schema schema = Schema.of(
+                Field.of("string", StandardSQLTypeName.STRING),
+                Field.of("int", StandardSQLTypeName.INT64)
+        );
+        batchCommitter.setDestTableSchema(destination, schema);
+
+        final CommitCallback commitCallback = mock(CommitCallback.class);
+        final CountDownLatch latch = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            latch.countDown();
+            return null;
+        }).when(commitCallback).commited();
+
+        final ImmutableList<InsertAllRequest.RowToInsert> rowsToInsert = ImmutableList.of(
+                InsertAllRequest.RowToInsert.of(ImmutableMap.of(
+                        "string", "test",
+                        "int", 123
+                ))
+        );
+        final TableId insertTableId = TableId.of(tableId.getProject(), tableId.getDataset(),
+                String.format("%s$%s", tableId.getTable(), LocalDate.now(ZoneOffset.UTC).format(DateTimeFormatter.ofPattern("yyyyMMdd"))));
+        final InsertAllRequest insertAllRequest = InsertAllRequest.of(insertTableId, rowsToInsert);
+        final BigQueryException bigqueryException = new BigQueryException(404, "Table not found", new BigQueryError("notFound", null, "Table not found"));
+        when(bigQuery.insertAll(insertAllRequest)).thenThrow(bigqueryException);
+
+        final List<DatastreamRecordMetadata> capturedRecordMetadata = new LinkedList<>();
+        final List<Exception> capturedExceptions = new LinkedList<>();
+
+        final SendCallback rowCallback = ((metadata, exception) -> {
+            capturedRecordMetadata.add(metadata);
+            Optional.ofNullable(exception).ifPresent(capturedExceptions::add);
+        });
+        final ImmutableList<SendCallback> callbacks = ImmutableList.of(rowCallback);
+        final ImmutableList<DatastreamRecordMetadata> metadata = ImmutableList.of(
+                new DatastreamRecordMetadata("test", "test", 0)
+        );
+        final ImmutableList<Long> timestamps = ImmutableList.of(System.currentTimeMillis());
+        batchCommitter.commit(rowsToInsert, destination.toString(), callbacks, metadata, timestamps, commitCallback);
+
+        latch.await(1, TimeUnit.SECONDS);
+
+        verify(bigQuery, never()).getTable(any(TableId.class));
+        verify(bigQuery, never()).create(any(TableInfo.class));
+        verify(bigQuery, atLeastOnce()).insertAll(insertAllRequest);
+        assertEquals(capturedRecordMetadata, metadata);
+        assertFalse(capturedExceptions.isEmpty());
+        capturedExceptions.forEach(e -> {
+            assertTrue(e instanceof TransientStreamingInsertException);
+            assertEquals(e.getCause(), bigqueryException);
+        });
+    }
+
     @Test
     public void testEvolveTableSchemaOnCommit() throws InterruptedException {
-        final TableId tableId = TableId.of("dataset_name", "table_name");
-        final long retention = -1L;
-        final String destination = String.join("/", tableId.getDataset(), tableId.getTable(), Long.toString(retention));
+        final TableId tableId = TableId.of("project_name", "dataset_name", "table_name");
+        final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination(tableId.getProject(), tableId.getDataset(), tableId.getTable());
+        destinationConfiguraitons.put(destination, new BigqueryDatastreamConfiguration(schemaEvolver, true));
         final Schema newSchema = Schema.of(
                 Field.of("string", StandardSQLTypeName.STRING),
                 Field.of("int", StandardSQLTypeName.INT64),
                 Field.of("new_string", StandardSQLTypeName.STRING)
         );
-        batchCommitter.setDestTableSchemaEvolver(destination, schemaEvolver);
         batchCommitter.setDestTableSchema(destination, newSchema);
 
         final Schema existingSchema = Schema.of(
@@ -218,7 +284,7 @@ public class BigqueryBatchCommitterTests {
         final Table evolvedTable = mock(Table.class);
         when(tableBuilder.build()).thenReturn(evolvedTable);
 
-        final TableId insertTableId = TableId.of(tableId.getDataset(),
+        final TableId insertTableId = TableId.of(tableId.getProject(), tableId.getDataset(),
                 String.format("%s$%s", tableId.getTable(), LocalDate.now(ZoneOffset.UTC).format(DateTimeFormatter.ofPattern("yyyyMMdd"))));
         final ImmutableList<InsertAllRequest.RowToInsert> rowsToInsert = ImmutableList.of(
                 InsertAllRequest.RowToInsert.of(ImmutableMap.of(
@@ -255,7 +321,7 @@ public class BigqueryBatchCommitterTests {
         }).when(commitCallback).commited();
 
 
-        batchCommitter.commit(rowsToInsert, destination, ImmutableList.of(), ImmutableList.of(
+        batchCommitter.commit(rowsToInsert, destination.toString(), ImmutableList.of(), ImmutableList.of(
                 new DatastreamRecordMetadata("test", "test", 0)
                 ),
                 ImmutableList.of(), commitCallback);
@@ -271,16 +337,69 @@ public class BigqueryBatchCommitterTests {
     }
 
     @Test
+    public void testSchemaNotEvolvedWhenNotManaged() throws InterruptedException {
+        final TableId tableId = TableId.of("project_name", "dataset_name", "table_name");
+        final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination(tableId.getProject(), tableId.getDataset(), tableId.getTable());
+        destinationConfiguraitons.put(destination, new BigqueryDatastreamConfiguration(schemaEvolver, false));
+
+        final TableId insertTableId = TableId.of(tableId.getProject(), tableId.getDataset(),
+                String.format("%s$%s", tableId.getTable(), LocalDate.now(ZoneOffset.UTC).format(DateTimeFormatter.ofPattern("yyyyMMdd"))));
+        final ImmutableList<InsertAllRequest.RowToInsert> rowsToInsert = ImmutableList.of(
+                InsertAllRequest.RowToInsert.of(ImmutableMap.of(
+                        "string", "test value 1",
+                        "int", 123,
+                        "missing", "test value 2"
+                ))
+        );
+        final InsertAllRequest insertAllRequest = InsertAllRequest.of(insertTableId, rowsToInsert);
+
+        final InsertAllResponse response = mock(InsertAllResponse.class);
+        final Map<Long, List<BigQueryError>> insertErrors = ImmutableMap.of(0L, ImmutableList.of(new BigQueryError("invalid", "missing", "Missing column")));
+        when(response.getInsertErrors()).thenReturn(insertErrors);
+        when(response.hasErrors()).thenReturn(!insertErrors.isEmpty());
+        when(bigQuery.insertAll(insertAllRequest)).thenReturn(response);
+
+        final CommitCallback commitCallback = mock(CommitCallback.class);
+        final CountDownLatch latch = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            latch.countDown();
+            return null;
+        }).when(commitCallback).commited();
+
+        final List<DatastreamRecordMetadata> capturedRecordMetadata = new LinkedList<>();
+        final List<Exception> capturedExceptions = new LinkedList<>();
+        final SendCallback rowCallback = ((metadata, exception) -> {
+            capturedRecordMetadata.add(metadata);
+            Optional.ofNullable(exception).ifPresent(capturedExceptions::add);
+        });
+        final ImmutableList<SendCallback> callbacks = ImmutableList.of(rowCallback);
+        final ImmutableList<DatastreamRecordMetadata> metadata = ImmutableList.of(new DatastreamRecordMetadata("test", "test", 0));
+        final ImmutableList<Long> timestamps = ImmutableList.of(System.currentTimeMillis());
+        batchCommitter.commit(rowsToInsert, destination.toString(), callbacks, metadata, timestamps, commitCallback);
+
+        latch.await(1, TimeUnit.SECONDS);
+
+        verify(bigQuery, never()).getTable(tableId);
+        verify(bigQuery, never()).create(any(TableInfo.class));
+        verify(bigQuery, atLeastOnce()).insertAll(any(InsertAllRequest.class));
+        assertEquals(capturedRecordMetadata, metadata);
+        assertFalse(capturedExceptions.isEmpty());
+        capturedExceptions.forEach(e -> {
+            assertTrue(e instanceof TransientStreamingInsertException);
+            assertEquals(e.getMessage(), ImmutableList.of(new BigQueryError("invalid", "missing", "Missing column")).toString());
+        });
+    }
+
+    @Test
     public void testEvolveTableSchemaFailure() throws InterruptedException {
-        final TableId tableId = TableId.of("dataset_name", "table_name");
-        final long retention = -1L;
-        final String destination = String.join("/", tableId.getDataset(), tableId.getTable(), Long.toString(retention));
+        final TableId tableId = TableId.of("project_name", "dataset_name", "table_name");
+        final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination(tableId.getProject(), tableId.getDataset(), tableId.getTable());
+        destinationConfiguraitons.put(destination, new BigqueryDatastreamConfiguration(schemaEvolver, true));
         final Schema newSchema = Schema.of(
                 Field.of("string", StandardSQLTypeName.STRING),
                 Field.of("int", StandardSQLTypeName.INT64),
                 Field.of("new_string", StandardSQLTypeName.STRING)
         );
-        batchCommitter.setDestTableSchemaEvolver(destination, schemaEvolver);
         batchCommitter.setDestTableSchema(destination, newSchema);
 
         final Schema existingSchema = Schema.of(
@@ -325,7 +444,7 @@ public class BigqueryBatchCommitterTests {
         final SendCallback sendCallback = mock(SendCallback.class);
         final DatastreamRecordMetadata metadata = new DatastreamRecordMetadata("test", "test", 0);
 
-        batchCommitter.commit(rowsToInsert, destination, ImmutableList.of(sendCallback), ImmutableList.of(metadata),
+        batchCommitter.commit(rowsToInsert, destination.toString(), ImmutableList.of(sendCallback), ImmutableList.of(metadata),
                 ImmutableList.of(), commitCallback);
 
         latch.await(1, TimeUnit.SECONDS);
@@ -344,15 +463,14 @@ public class BigqueryBatchCommitterTests {
 
     @Test
     public void testEvolveTableSchemaConcurrencyFailure() throws InterruptedException {
-        final TableId tableId = TableId.of("dataset_name", "table_name");
-        final long retention = -1L;
-        final String destination = String.join("/", tableId.getDataset(), tableId.getTable(), Long.toString(retention));
+        final TableId tableId = TableId.of("project_name", "dataset_name", "table_name");
+        final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination(tableId.getProject(), tableId.getDataset(), tableId.getTable());
+        destinationConfiguraitons.put(destination, new BigqueryDatastreamConfiguration(schemaEvolver, true));
         final Schema newSchema = Schema.of(
                 Field.of("string", StandardSQLTypeName.STRING),
                 Field.of("int", StandardSQLTypeName.INT64),
                 Field.of("new_string", StandardSQLTypeName.STRING)
         );
-        batchCommitter.setDestTableSchemaEvolver(destination, schemaEvolver);
         batchCommitter.setDestTableSchema(destination, newSchema);
 
         final Schema existingSchema = Schema.of(
@@ -415,7 +533,7 @@ public class BigqueryBatchCommitterTests {
                         "int", 123
                 ))
         );
-        final TableId insertTableId = TableId.of(tableId.getDataset(),
+        final TableId insertTableId = TableId.of(tableId.getProject(), tableId.getDataset(),
                 String.format("%s$%s", tableId.getTable(), LocalDate.now(ZoneOffset.UTC).format(DateTimeFormatter.ofPattern("yyyyMMdd"))));
         final InsertAllRequest insertAllRequest = InsertAllRequest.of(insertTableId, rowsToInsert);
 
@@ -437,7 +555,7 @@ public class BigqueryBatchCommitterTests {
             }
         });
 
-        batchCommitter.commit(rowsToInsert, destination, ImmutableList.of(), ImmutableList.of(
+        batchCommitter.commit(rowsToInsert, destination.toString(), ImmutableList.of(), ImmutableList.of(
                 new DatastreamRecordMetadata("test", "test", 0)
                 ),
                 ImmutableList.of(), commitCallback);

@@ -11,12 +11,13 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import org.apache.commons.lang3.Validate;
+
 import com.google.cloud.bigquery.Field;
 import com.google.cloud.bigquery.FieldList;
 import com.google.cloud.bigquery.Schema;
 import com.google.cloud.bigquery.StandardSQLTypeName;
 import com.google.common.collect.ImmutableList;
-import org.apache.commons.lang3.Validate;
 
 
 /**
@@ -104,7 +105,7 @@ public class SimpleBigquerySchemaEvolver implements BigquerySchemaEvolver {
         final StandardSQLTypeName mergedType;
         switch (newType) {
             case INT64:
-                switch(baseType) {
+                switch (baseType) {
                     case FLOAT64:
                     case NUMERIC:
                     case INT64:
@@ -130,6 +131,7 @@ public class SimpleBigquerySchemaEvolver implements BigquerySchemaEvolver {
                 } else {
                     throw new IncompatibleSchemaEvolutionException(String.format("Cannot coerce type %s into %s", newType, baseType));
                 }
+                break;
         }
         return mergedType;
     }
@@ -138,7 +140,7 @@ public class SimpleBigquerySchemaEvolver implements BigquerySchemaEvolver {
         Validate.notNull(baseMode, "baseMode cannot be null");
         Validate.notNull(newMode, "newMode cannot be null");
         final Field.Mode mergedMode;
-        switch(baseMode) {
+        switch (baseMode) {
             case REPEATED:
                 switch (newMode) {
                     case REPEATED:

@@ -1,0 +1,158 @@
+package com.linkedin.datastream.bigquery;
+
+import com.codahale.metrics.MetricRegistry;
+import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolver;
+import com.linkedin.datastream.bigquery.schema.SimpleBigquerySchemaEvolver;
+import com.linkedin.datastream.bigquery.translator.SchemaTranslator;
+import com.linkedin.datastream.common.Package;
+import com.linkedin.datastream.common.Record;
+import com.linkedin.datastream.metrics.DynamicMetricsManager;
+import io.confluent.kafka.schemaregistry.client.MockSchemaRegistryClient;
+import io.confluent.kafka.schemaregistry.client.rest.exceptions.RestClientException;
+import io.confluent.kafka.serializers.KafkaAvroDeserializer;
+import io.confluent.kafka.serializers.KafkaAvroSerializer;
+import org.apache.avro.SchemaBuilder;
+import org.apache.avro.generic.GenericRecord;
+import org.apache.avro.generic.GenericRecordBuilder;
+import org.testng.annotations.BeforeClass;
+import org.testng.annotations.BeforeMethod;
+import org.testng.annotations.Test;
+
+import java.io.IOException;
+import java.time.Instant;
+
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+
+public class BatchTests {
+
+    @BeforeClass
+    public static void beforeClass() {
+        DynamicMetricsManager.createInstance(new MetricRegistry(), BigqueryBatchCommitterTests.class.getSimpleName());
+    }
+
+    private MockSchemaRegistryClient schemaRegistryClient;
+    private KafkaAvroDeserializer deserializer;
+    private KafkaAvroSerializer serializer;
+    private BigqueryBatchCommitter committer;
+    private SchemaRegistry schemaRegistry;
+    private BigquerySchemaEvolver schemaEvolver;
+    private Batch batch;
+
+    @BeforeMethod
+    void beforeTest() {
+        schemaRegistryClient = new MockSchemaRegistryClient();
+        deserializer = new KafkaAvroDeserializer(schemaRegistryClient);
+        serializer = new KafkaAvroSerializer(schemaRegistryClient);
+        committer = mock(BigqueryBatchCommitter.class);
+        schemaRegistry = new SchemaRegistry("http://schema-registry", schemaRegistryClient, "-value");
+        schemaEvolver = new SimpleBigquerySchemaEvolver();
+        batch = new Batch(10, 10000, 1, schemaRegistry, committer, schemaEvolver);
+    }
+
+    @Test
+    public void testInitSchemaOnFirstWrite() throws InterruptedException, IOException, RestClientException {
+        final org.apache.avro.Schema avroSchema = SchemaBuilder.builder("com.linkedin")
+                .record("test_message").fields().name("message").type("string").noDefault()
+                .endRecord();
+
+        final GenericRecord record = new GenericRecordBuilder(avroSchema)
+                .set("message", "test")
+                .build();
+
+        final String topicName = "testTopic";
+
+        schemaRegistryClient.register(topicName + "-value", avroSchema);
+
+        final String datasetName = "dataset_name";
+        final long retention = -1;
+        final String packageDestination = String.join("/", datasetName, Long.toString(retention));
+
+        final Package aPackage = new Package.PackageBuilder()
+                .setTopic(topicName)
+                .setDestination(packageDestination)
+                .setOffset("0")
+                .setPartition("0")
+                .setCheckpoint("test")
+                .setTimestamp(Instant.now().toEpochMilli())
+                .setRecord(new Record(null, serializer.serialize(topicName, record)))
+                .build();
+
+        batch.write(aPackage);
+
+        final String committerDestination = String.join("/", datasetName, topicName, Long.toString(retention));
+        final com.google.cloud.bigquery.Schema bqSchema = SchemaTranslator.translate(avroSchema);
+        verify(committer).setDestTableSchema(committerDestination, bqSchema);
+    }
+
+    @Test
+    public void testEvolveSchemaOnWrite() throws InterruptedException, IOException, RestClientException {
+        final org.apache.avro.Schema avroSchema = SchemaBuilder.builder("com.linkedin")
+                .record("test_message").fields().name("message").type("string").noDefault()
+                .endRecord();
+        {
+            final GenericRecord record = new GenericRecordBuilder(avroSchema)
+                    .set("message", "test")
+                    .build();
+
+            final String topicName = "testTopic";
+
+            schemaRegistryClient.register(topicName + "-value", avroSchema);
+
+            final String datasetName = "dataset_name";
+            final long retention = -1;
+            final String packageDestination = String.join("/", datasetName, Long.toString(retention));
+
+            final Package aPackage = new Package.PackageBuilder()
+                    .setTopic(topicName)
+                    .setDestination(packageDestination)
+                    .setOffset("0")
+                    .setPartition("0")
+                    .setCheckpoint("test")
+                    .setTimestamp(Instant.now().toEpochMilli())
+                    .setRecord(new Record(null, serializer.serialize(topicName, record)))
+                    .build();
+
+            batch.write(aPackage);
+
+            final String committerDestination = String.join("/", datasetName, topicName, Long.toString(retention));
+            final com.google.cloud.bigquery.Schema bqSchema = SchemaTranslator.translate(avroSchema);
+            verify(committer).setDestTableSchema(committerDestination, bqSchema);
+        }
+        final org.apache.avro.Schema newAvroSchema = SchemaBuilder.builder("com.linkedin")
+                .record("test_message").fields()
+                    .name("message").type("string").noDefault()
+                    .name("new_int").type("int").noDefault()
+                .endRecord();
+
+        final GenericRecord record = new GenericRecordBuilder(newAvroSchema)
+                .set("message", "test")
+                .set("new_int", 123)
+                .build();
+
+        final String topicName = "testTopic";
+
+        schemaRegistryClient.register(topicName + "-value", newAvroSchema);
+
+        final String datasetName = "dataset_name";
+        final long retention = -1;
+        final String packageDestination = String.join("/", datasetName, Long.toString(retention));
+
+        final Package aPackage = new Package.PackageBuilder()
+                .setTopic(topicName)
+                .setDestination(packageDestination)
+                .setOffset("1")
+                .setPartition("0")
+                .setCheckpoint("test")
+                .setTimestamp(Instant.now().toEpochMilli())
+                .setRecord(new Record(null, serializer.serialize(topicName, record)))
+                .build();
+
+        batch.write(aPackage);
+
+        final String committerDestination = String.join("/", datasetName, topicName, Long.toString(retention));
+        final com.google.cloud.bigquery.Schema bqSchema = schemaEvolver.evolveSchema(SchemaTranslator.translate(avroSchema), SchemaTranslator.translate(newAvroSchema));
+        verify(committer).setDestTableSchema(committerDestination, bqSchema);
+
+    }
+}

@@ -6,11 +6,14 @@
 package com.linkedin.datastream.bigquery;
 
 import java.time.Duration;
+import java.util.Map;
 import java.util.Properties;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolver;
+import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolverFactory;
 import com.linkedin.datastream.common.Datastream;
 import com.linkedin.datastream.common.DatastreamDestination;
 import com.linkedin.datastream.common.VerifiableProperties;
@@ -38,9 +41,10 @@ public class BigqueryTransportProviderAdmin implements TransportProviderAdmin {
 
     private static final String CONFIG_TRANSLATOR_DOMAIN_PREFIX = "translator";
 
-    private static final String CONFIG_COMMITTER_DOMAIN_PREFIX = "committer";
+    protected static final String CONFIG_COMMITTER_DOMAIN_PREFIX = "committer";
+    protected static final String CONFIG_SCHEMA_EVOLVERS_DOMAIN_PREFIX = "schemaEvolvers";
 
-    private BigqueryTransportProvider _transportProvider;
+    private final BigqueryTransportProvider _transportProvider;
 
     /**
      * Constructor for BigqueryTransportProviderAdmin.
@@ -52,6 +56,9 @@ public class BigqueryTransportProviderAdmin implements TransportProviderAdmin {
         VerifiableProperties committerProperties = new VerifiableProperties(tpProperties.getDomainProperties(
                 CONFIG_COMMITTER_DOMAIN_PREFIX, false));
 
+        final VerifiableProperties schemaEvolversProperties = new VerifiableProperties(tpProperties.getDomainProperties(CONFIG_SCHEMA_EVOLVERS_DOMAIN_PREFIX));
+        final Map<String, BigquerySchemaEvolver> bigquerySchemaEvolverMap = BigquerySchemaEvolverFactory.createBigquerySchemaEvolvers(schemaEvolversProperties);
+
         _transportProvider = new BigqueryTransportProvider.BigqueryTransportProviderBuilder()
                 .setTransportProviderName(transportProviderName)
                 .setBatchBuilderQueueSize(tpProperties.getInt(CONFIG_BATCHBUILDER_QUEUE_SIZE, 1000))
@@ -61,7 +68,13 @@ public class BigqueryTransportProviderAdmin implements TransportProviderAdmin {
                 .setMaxInflightBatchCommits(tpProperties.getInt(CONFIG_MAX_INFLIGHT_COMMITS, 1))
                 .setCommitter(new BigqueryBatchCommitter(committerProperties))
                 .setTranslatorProperties(new VerifiableProperties(tpProperties.getDomainProperties(CONFIG_TRANSLATOR_DOMAIN_PREFIX)))
+                .setBigquerySchemaEvolvers(bigquerySchemaEvolverMap)
+                .setDefaultBigquerySchemaEvolverName(schemaEvolversProperties.getString("default"))
                 .build();
+    }
+
+    BigqueryTransportProviderAdmin(final BigqueryTransportProvider provider) {
+        _transportProvider = provider;
     }
 
     @Override

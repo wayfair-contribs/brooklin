@@ -8,23 +8,19 @@ package com.linkedin.datastream.bigquery;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.text.SimpleDateFormat;
-import java.util.Calendar;
-import java.util.HashMap;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
-import java.util.TimeZone;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import com.google.auth.Credentials;
-import com.google.auth.oauth2.GoogleCredentials;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import com.google.cloud.bigquery.BigQuery;
 import com.google.cloud.bigquery.BigQueryException;
@@ -33,11 +29,18 @@ import com.google.cloud.bigquery.InsertAllRequest;
 import com.google.cloud.bigquery.InsertAllResponse;
 import com.google.cloud.bigquery.Schema;
 import com.google.cloud.bigquery.StandardTableDefinition;
+import com.google.cloud.bigquery.Table;
 import com.google.cloud.bigquery.TableDefinition;
 import com.google.cloud.bigquery.TableId;
 import com.google.cloud.bigquery.TableInfo;
 import com.google.cloud.bigquery.TimePartitioning;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import com.google.auth.Credentials;
+import com.google.auth.oauth2.GoogleCredentials;
+
+import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolver;
 import com.linkedin.datastream.common.DatastreamRecordMetadata;
 import com.linkedin.datastream.common.DatastreamTransientException;
 import com.linkedin.datastream.common.SendCallback;
@@ -52,31 +55,43 @@ import com.linkedin.datastream.server.api.transport.buffered.CommitCallback;
 public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequest.RowToInsert>> {
     private static final Logger LOG = LoggerFactory.getLogger(BigqueryBatchCommitter.class.getName());
 
-    private ConcurrentMap<String, Schema> _destTableSchemas;
-    private Map<String, Boolean> _destTableCreated;
+    private final ConcurrentMap<String, Schema> _destTableSchemas;
+    private final ConcurrentMap<String, BigquerySchemaEvolver> _destTableSchemaEvolvers;
 
     private static final String CONFIG_THREADS = "threads";
 
     private final ExecutorService _executor;
-    private final int _numOfCommitterThreads;
 
     private final BigQuery _bigquery;
+
+    private final DateTimeFormatter partitionDateFormatter = DateTimeFormatter.ofPattern("yyyyMMdd");
 
     private static String sanitizeTableName(String tableName) {
         return tableName.replaceAll("[^A-Za-z0-9_]+", "_");
     }
 
     /**
-     * Constructor for BigqueryBatchCommitter
-     * @param properties configuration options
+     * Constructor.
+     * @param properties the VerifiableProperties
      */
-    public BigqueryBatchCommitter(VerifiableProperties properties) {
+    public BigqueryBatchCommitter(final VerifiableProperties properties) {
+        this(constructClientFromProperties(properties), properties.getInt(CONFIG_THREADS, 1));
+    }
+
+    BigqueryBatchCommitter(final BigQuery bigQuery, final int numThreads) {
+        this._bigquery = bigQuery;
+        this._executor = Executors.newFixedThreadPool(numThreads);
+        this._destTableSchemas = new ConcurrentHashMap<>();
+        this._destTableSchemaEvolvers = new ConcurrentHashMap<>();
+    }
+
+    private static BigQuery constructClientFromProperties(final VerifiableProperties properties) {
         String credentialsPath = properties.getString("credentialsPath");
         String projectId = properties.getString("projectId");
         try {
             Credentials credentials = GoogleCredentials
                     .fromStream(new FileInputStream(credentialsPath));
-            this._bigquery = BigQueryOptions.newBuilder()
+            return BigQueryOptions.newBuilder()
                     .setProjectId(projectId)
                     .setCredentials(credentials).build().getService();
         } catch (FileNotFoundException e) {
@@ -86,47 +101,83 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
             LOG.error("Unable to read credentials: {}", credentialsPath);
             throw new RuntimeException(e);
         }
-
-        this._numOfCommitterThreads = properties.getInt(CONFIG_THREADS, 1);
-        this._executor = Executors.newFixedThreadPool(_numOfCommitterThreads);
-
-        this._destTableSchemas = new ConcurrentHashMap<>();
-        this._destTableCreated = new HashMap<>();
     }
 
-    private synchronized void createTableIfAbsent(String destination) {
-        if (_destTableCreated.containsKey(destination)) {
-            return;
-        }
-        String[] datasetTableNameRetention = destination.split("/");
+    private synchronized boolean createOrUpdateTable(String destination) {
+        final String[] datasetTableNameRetention = destination.split("/");
 
-        try {
-            TableId tableId = TableId.of(datasetTableNameRetention[0], sanitizeTableName(datasetTableNameRetention[1]));
-            TableDefinition tableDefinition;
-            long partitionRetentionDays = Long.parseLong(datasetTableNameRetention[2]);
-            if (partitionRetentionDays > 0) {
-                tableDefinition = StandardTableDefinition.newBuilder()
-                        .setSchema(_destTableSchemas.get(destination))
-                        .setTimePartitioning(
-                                TimePartitioning.of(TimePartitioning.Type.DAY, partitionRetentionDays * 86400000L))
-                        .build();
+        final Schema desiredTableSchema = _destTableSchemas.get(destination);
+
+        final long partitionRetentionDays = Long.parseLong(datasetTableNameRetention[2]);
+        final TimePartitioning timePartitioning;
+        if (partitionRetentionDays > 0) {
+            timePartitioning = TimePartitioning.of(TimePartitioning.Type.DAY, partitionRetentionDays * 86400000L);
+        } else {
+            timePartitioning = TimePartitioning.of(TimePartitioning.Type.DAY);
+        }
+
+        final TableId tableId = TableId.of(datasetTableNameRetention[0], sanitizeTableName(datasetTableNameRetention[1]));
+
+        final Optional<Table> optionalExistingTable = Optional.ofNullable(_bigquery.getTable(tableId));
+        return optionalExistingTable.map(table -> updateTable(destination, desiredTableSchema, timePartitioning, tableId, table))
+                .orElseGet(() -> createTable(destination, desiredTableSchema, timePartitioning, tableId));
+    }
+
+    private boolean updateTable(final String destination, final Schema desiredTableSchema,
+                             final TimePartitioning timePartitioning, final TableId tableId, final Table existingTable) {
+        final Schema existingTableSchema = Optional.ofNullable(existingTable.getDefinition().getSchema())
+                .orElseThrow(() -> new IllegalStateException(String.format("schema not defined for table: %s", tableId)));
+        boolean tableUpdated;
+        if (!desiredTableSchema.equals(existingTableSchema)) {
+            final Schema evolvedSchema = _destTableSchemaEvolvers.get(destination).evolveSchema(existingTableSchema, desiredTableSchema);
+            if (!existingTableSchema.equals(evolvedSchema)) {
+                try {
+                    existingTable.toBuilder()
+                            .setDefinition(createTableDefinition(evolvedSchema, timePartitioning))
+                            .build().update();
+                    tableUpdated = true;
+                } catch (BigQueryException e) {
+                    final Table currentTable = _bigquery.getTable(tableId);
+                    final Schema currentTableSchema = currentTable.getDefinition().getSchema();
+                    if (evolvedSchema.equals(currentTableSchema)) {
+                        LOG.info("Schema already evolved for table {}", destination);
+                        tableUpdated = true;
+                    } else if (!existingTableSchema.equals(currentTableSchema)) {
+                        LOG.warn("Concurrent table schema update exception encountered for table {}. Retrying update with new base schema...", destination, e);
+                        tableUpdated = updateTable(destination, desiredTableSchema, timePartitioning, tableId, currentTable);
+                    } else {
+                        LOG.error("Failed to update schema for table {}", destination, e);
+                        throw e;
+                    }
+                }
+                LOG.debug("Table {} updated with evolved schema", destination);
             } else {
-                tableDefinition = StandardTableDefinition.newBuilder()
-                        .setSchema(_destTableSchemas.get(destination))
-                        .setTimePartitioning(TimePartitioning.of(TimePartitioning.Type.DAY))
-                        .build();
+                tableUpdated = false;
             }
-            TableInfo tableInfo = TableInfo.newBuilder(tableId, tableDefinition).build();
-            if (_bigquery.getTable(tableId) != null) {
-                LOG.debug("Table {} already exist", destination);
-                return;
-            }
+        } else {
+            LOG.debug("Table {} already exist", destination);
+            tableUpdated = false;
+        }
+        return tableUpdated;
+    }
+
+    private boolean createTable(final String destination, final Schema desiredTableSchema, final TimePartitioning timePartitioning, final TableId tableId) {
+        final TableInfo tableInfo = TableInfo.newBuilder(tableId, createTableDefinition(desiredTableSchema, timePartitioning)).build();
+        try {
             _bigquery.create(tableInfo);
-            LOG.info("Table {} created successfully", destination);
         } catch (BigQueryException e) {
-            LOG.warn("Failed to create table {} - {}", destination, e);
+            LOG.warn("Failed to create table {}", destination, e);
             throw e;
         }
+        LOG.info("Table {} created successfully", destination);
+        return true;
+    }
+
+    private static TableDefinition createTableDefinition(final Schema schema, final TimePartitioning timePartitioning) {
+        return StandardTableDefinition.newBuilder()
+                .setSchema(schema)
+                .setTimePartitioning(timePartitioning)
+                .build();
     }
 
     /**
@@ -135,7 +186,11 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
      * @param schema table schema
      */
     public void setDestTableSchema(String dest, Schema schema) {
-        _destTableSchemas.putIfAbsent(dest, schema);
+        _destTableSchemas.put(dest, schema);
+    }
+
+    public void setDestTableSchemaEvolver(final String dest, final BigquerySchemaEvolver schemaEvolver) {
+        _destTableSchemaEvolvers.put(dest, schemaEvolver);
     }
 
     @Override
@@ -150,80 +205,76 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
         }
 
         final Runnable committerTask = () -> {
-            Exception exception = null;
-            InsertAllResponse response = null;
+            final String classSimpleName = this.getClass().getSimpleName();
 
-            try {
-                createTableIfAbsent(destination);
+            final String partition = partitionDateFormatter.format(LocalDate.now(ZoneOffset.UTC));
+            final String[] datasetTable = destination.split("/");
+            final String tableName = sanitizeTableName(datasetTable[1]);
+            final TableId tableId = TableId.of(datasetTable[0], String.format("%s$%s", tableName, partition));
 
-                TimeZone utcTimeZone = TimeZone.getTimeZone("UTC");
-                SimpleDateFormat timeFmt = new SimpleDateFormat("yyyyMMdd");
-                timeFmt.setTimeZone(utcTimeZone);
+            LOG.debug("Committing a batch to dataset {} and table {}", datasetTable[0], tableName);
 
-                String[] datasetTable = destination.split("/");
-                TableId tableId = TableId.of(datasetTable[0],
-                        sanitizeTableName(datasetTable[1]) + "$" + timeFmt.format(
-                                Calendar.getInstance(utcTimeZone).getTimeInMillis()));
+            final InsertAllRequest insertAllRequest = InsertAllRequest.newBuilder(tableId, batch).build();
 
-                LOG.debug("Committing a batch to dataset {} and table {}", datasetTable[0], sanitizeTableName(datasetTable[1]));
-                long start = System.currentTimeMillis();
+            final long start = System.currentTimeMillis();
+            Map<Integer, Exception> insertErrors = insertRowsAndMapErrors(insertAllRequest);
+            final long end = System.currentTimeMillis();
+            DynamicMetricsManager.getInstance().createOrUpdateHistogram(classSimpleName, recordMetadata.get(0).getTopic(),
+                    "insertAllExecTime", end - start);
 
-                response = _bigquery.insertAll(
-                        InsertAllRequest.newBuilder(tableId, batch)
-                                .build());
-
-                DynamicMetricsManager.getInstance().createOrUpdateHistogram(
-                        this.getClass().getSimpleName(),
-                        recordMetadata.get(0).getTopic(),
-                        "insertAllExecTime",
-                         System.currentTimeMillis() - start);
-            } catch (Exception e) {
-                LOG.warn("Failed to insert a rows {}", response);
-                exception = new DatastreamTransientException(e);
-            }
-
-            for (int i = 0; i < ackCallbacks.size(); i++) {
-                if (exception != null) {
-                    // entire batch failed
-                    DynamicMetricsManager.getInstance().createOrUpdateMeter(
-                            this.getClass().getSimpleName(),
-                            recordMetadata.get(i).getTopic(),
-                            "errorCount",
-                            1);
-                    ackCallbacks.get(i).onCompletion(recordMetadata.get(i), exception);
-                    // force to check if table exists next time
-                    _destTableCreated.remove(destination);
-                } else {
-                    Long key = Long.valueOf(i);
-                    if (response != null && response.hasErrors() && response.getInsertErrors().containsKey(key)) {
-                        LOG.warn("Failed to insert a row {} {}", i, response.getInsertErrors().get(key));
-                        DynamicMetricsManager.getInstance().createOrUpdateMeter(
-                                this.getClass().getSimpleName(),
-                                recordMetadata.get(i).getTopic(),
-                                "errorCount",
-                                1);
-                        ackCallbacks.get(i).onCompletion(recordMetadata.get(i),
-                                new DatastreamTransientException(response.getInsertErrors().get(key).toString()));
-                    } else {
-                        DynamicMetricsManager.getInstance().createOrUpdateMeter(
-                                this.getClass().getSimpleName(),
-                                recordMetadata.get(i).getTopic(),
-                                "commitCount",
-                                1);
-                        DynamicMetricsManager.getInstance().createOrUpdateHistogram(
-                                this.getClass().getSimpleName(),
-                                recordMetadata.get(i).getTopic(),
-                                "eteLatency",
-                                System.currentTimeMillis() - sourceTimestamps.get(i));
-                        ackCallbacks.get(i).onCompletion(recordMetadata.get(i), null);
+            // If we encountered insert errors, try creating/updating the destination table before retrying
+            if (!insertErrors.isEmpty()) {
+                try {
+                    final boolean tableUpdatedOrCreated = createOrUpdateTable(destination);
+                    if (tableUpdatedOrCreated) {
+                        LOG.info("Table created/updated for destination {}. Retrying batch...", destination);
+                        insertErrors = insertRowsAndMapErrors(insertAllRequest);
                     }
+                } catch (final Exception e) {
+                    final DatastreamTransientException wrappedException = new DatastreamTransientException(e);
+                    insertErrors = IntStream.range(0, batch.size()).boxed().collect(Collectors.toMap(i -> i, i -> wrappedException));
                 }
             }
+
+            final Map<Integer, Exception> finalInsertErrors = insertErrors;
+            IntStream.range(0, ackCallbacks.size()).forEach(i -> {
+                final DatastreamRecordMetadata currentRecordMetadata = recordMetadata.get(i);
+                final SendCallback ackCallback = ackCallbacks.get(i);
+                final String topic = currentRecordMetadata.getTopic();
+
+                if (!finalInsertErrors.containsKey(i)) {
+                    DynamicMetricsManager.getInstance().createOrUpdateMeter(classSimpleName, topic, "commitCount", 1);
+                    final long currentRecordSourceTimestamp = sourceTimestamps.get(i);
+                    DynamicMetricsManager.getInstance().createOrUpdateHistogram(classSimpleName, topic, "eteLatency",
+                            System.currentTimeMillis() - currentRecordSourceTimestamp);
+                    ackCallback.onCompletion(currentRecordMetadata, null);
+                } else {
+                    final Exception insertError = finalInsertErrors.get(i);
+                    LOG.warn("Failed to insert a row {} {}", i, insertError.getMessage());
+                    DynamicMetricsManager.getInstance().createOrUpdateMeter(classSimpleName, topic, "errorCount", 1);
+                    ackCallback.onCompletion(currentRecordMetadata, insertError);
+                }
+            });
 
             callback.commited();
         };
 
         _executor.execute(committerTask);
+    }
+
+    private Map<Integer, Exception> insertRowsAndMapErrors(final InsertAllRequest insertAllRequest) {
+        Map<Integer, Exception> insertErrors;
+        try {
+            final InsertAllResponse response = _bigquery.insertAll(insertAllRequest);
+            insertErrors = response.getInsertErrors().entrySet().stream().collect(Collectors.toMap(
+                    entry -> entry.getKey().intValue(),
+                    entry -> new DatastreamTransientException(entry.getValue().toString())
+            ));
+        } catch (final Exception e) {
+            final DatastreamTransientException wrappedException = new DatastreamTransientException(e);
+            insertErrors = IntStream.range(0, insertAllRequest.getRows().size()).boxed().collect(Collectors.toMap(i -> i, i -> wrappedException));
+        }
+        return insertErrors;
     }
 
     @Override

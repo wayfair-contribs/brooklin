@@ -159,6 +159,12 @@ project(':datastream-common') {
 }
 
 project(':datastream-bigquery') {
+  checkstyle {
+    configFile = file("${project.rootDir}/checkstyle/checkstyle.xml")
+    sourceSets = [ getProject().sourceSets.main ]
+    toolVersion = "6.7"
+    ignoreFailures = false
+  }
   dependencies {
 
     compile "org.apache.avro:avro:$avroVersion"

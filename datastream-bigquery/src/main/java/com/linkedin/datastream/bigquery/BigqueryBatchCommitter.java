@@ -22,6 +22,11 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.google.auth.Credentials;
+import com.google.auth.oauth2.GoogleCredentials;
 import com.google.cloud.bigquery.BigQuery;
 import com.google.cloud.bigquery.BigQueryException;
 import com.google.cloud.bigquery.BigQueryOptions;
@@ -34,11 +39,6 @@ import com.google.cloud.bigquery.TableDefinition;
 import com.google.cloud.bigquery.TableId;
 import com.google.cloud.bigquery.TableInfo;
 import com.google.cloud.bigquery.TimePartitioning;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import com.google.auth.Credentials;
-import com.google.auth.oauth2.GoogleCredentials;
 
 import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolver;
 import com.linkedin.datastream.common.DatastreamRecordMetadata;
@@ -189,6 +189,11 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
         _destTableSchemas.put(dest, schema);
     }
 
+    /**
+     * Set the destination table schema evolver.
+     * @param dest the destination
+     * @param schemaEvolver the BigquerySchemaEvolver
+     */
     public void setDestTableSchemaEvolver(final String dest, final BigquerySchemaEvolver schemaEvolver) {
         _destTableSchemaEvolvers.put(dest, schemaEvolver);
     }

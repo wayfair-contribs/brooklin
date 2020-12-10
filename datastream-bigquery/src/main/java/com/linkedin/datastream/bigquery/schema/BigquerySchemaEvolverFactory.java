@@ -1,10 +1,15 @@
+/**
+ *  Copyright 2020 Wayfair LLC. All rights reserved.
+ *  Licensed under the BSD 2-Clause License. See the LICENSE file in the project root for license information.
+ *  See the NOTICE file in the project root for additional information regarding copyright ownership.
+ */
 package com.linkedin.datastream.bigquery.schema;
-
-import com.linkedin.datastream.common.VerifiableProperties;
 
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+
+import com.linkedin.datastream.common.VerifiableProperties;
 
 /**
  * A factory to construct BigquerySchemaEvolver instances.

@@ -1,21 +1,36 @@
+/**
+ *  Copyright 2020 Wayfair LLC. All rights reserved.
+ *  Licensed under the BSD 2-Clause License. See the LICENSE file in the project root for license information.
+ *  See the NOTICE file in the project root for additional information regarding copyright ownership.
+ */
 package com.linkedin.datastream.server.api.transport.buffered;
 
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableMap;
-import com.linkedin.datastream.common.BrooklinEnvelope;
-import com.linkedin.datastream.common.DatastreamRecordMetadata;
-import com.linkedin.datastream.common.SendCallback;
-import com.linkedin.datastream.server.DatastreamProducerRecordBuilder;
-import com.linkedin.datastream.common.Package;
 import org.testng.annotations.Test;
 
-import static com.linkedin.datastream.server.api.transport.buffered.AbstractBufferedTransportProvider.*;
-import static org.mockito.Mockito.*;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 
+import com.linkedin.datastream.common.BrooklinEnvelope;
+import com.linkedin.datastream.common.DatastreamRecordMetadata;
+import com.linkedin.datastream.common.Package;
+import com.linkedin.datastream.common.SendCallback;
+import com.linkedin.datastream.server.DatastreamProducerRecordBuilder;
+
+import static com.linkedin.datastream.server.api.transport.buffered.AbstractBufferedTransportProvider.KAFKA_ORIGIN_OFFSET;
+import static com.linkedin.datastream.server.api.transport.buffered.AbstractBufferedTransportProvider.KAFKA_ORIGIN_PARTITION;
+import static com.linkedin.datastream.server.api.transport.buffered.AbstractBufferedTransportProvider.KAFKA_ORIGIN_TOPIC;
+
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyZeroInteractions;
+
+/**
+ * Test AbstractBufferedTransportProvider.
+ */
 public class TestAbstractBufferedTransportProvider {
 
     private static class TestBufferedTransportProvider extends AbstractBufferedTransportProvider {

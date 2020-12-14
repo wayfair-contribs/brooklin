@@ -13,6 +13,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutorService;
@@ -72,58 +73,93 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
     }
 
     private synchronized boolean createOrUpdateTable(final TableId tableId, final Schema desiredTableSchema,
-                                                     final BigquerySchemaEvolver schemaEvolver, final Long partitionExpirationDays) {
+                                                     final BigquerySchemaEvolver schemaEvolver, final Long partitionExpirationDays,
+                                                     final List<BigqueryLabel> labels) {
         final TimePartitioning timePartitioning = Optional.ofNullable(partitionExpirationDays)
                 .filter(partitionRetentionDays -> partitionRetentionDays > 0)
                 .map(partitionRetentionDays -> TimePartitioning.of(TimePartitioning.Type.DAY, Duration.of(partitionRetentionDays, ChronoUnit.DAYS).toMillis()))
                 .orElse(TimePartitioning.of(TimePartitioning.Type.DAY));
 
         final Optional<Table> optionalExistingTable = Optional.ofNullable(_bigquery.getTable(tableId));
-        return optionalExistingTable.map(table -> updateTable(tableId, desiredTableSchema, timePartitioning, table, schemaEvolver))
-                .orElseGet(() -> createTable(tableId, desiredTableSchema, timePartitioning));
+        return optionalExistingTable.map(table -> updateTable(tableId, desiredTableSchema, timePartitioning, table, schemaEvolver, labels))
+                .orElseGet(() -> createTable(tableId, desiredTableSchema, timePartitioning, labels));
     }
 
     private boolean updateTable(final TableId tableId, final Schema desiredTableSchema,
                              final TimePartitioning timePartitioning,  final Table existingTable,
-                                final BigquerySchemaEvolver schemaEvolver) {
+                                final BigquerySchemaEvolver schemaEvolver,
+                                final List<BigqueryLabel> labels) {
         final Schema existingTableSchema = Optional.ofNullable(existingTable.getDefinition().getSchema())
                 .orElseThrow(() -> new IllegalStateException(String.format("schema not defined for table: %s", tableId)));
-        boolean tableUpdated;
+        final Set<BigqueryLabel> existingLabels = existingTable.getLabels().entrySet().stream()
+                .map(entry -> new BigqueryLabel(entry.getKey(), entry.getValue())).collect(Collectors.toSet());
+        final Optional<Map<String, String>> optionalLabelMap;
+        if (!existingLabels.containsAll(labels)) {
+            optionalLabelMap = Optional.of(labels.stream().collect(Collectors.toMap(BigqueryLabel::getName, BigqueryLabel::getValue)));
+        } else {
+            optionalLabelMap = Optional.empty();
+        }
+        final Optional<Schema> optionalEvolvedSchema;
         if (!desiredTableSchema.equals(existingTableSchema)) {
             final Schema evolvedSchema = schemaEvolver.evolveSchema(existingTableSchema, desiredTableSchema);
             if (!existingTableSchema.equals(evolvedSchema)) {
-                try {
-                    existingTable.toBuilder()
-                            .setDefinition(createTableDefinition(evolvedSchema, timePartitioning))
-                            .build().update();
-                    tableUpdated = true;
-                } catch (BigQueryException e) {
-                    final Table currentTable = _bigquery.getTable(tableId);
+                optionalEvolvedSchema = Optional.of(evolvedSchema);
+            } else {
+                optionalEvolvedSchema = Optional.empty();
+            }
+        } else {
+            optionalEvolvedSchema = Optional.empty();
+        }
+        boolean tableUpdated;
+        if (optionalLabelMap.isPresent() || optionalEvolvedSchema.isPresent()) {
+            try {
+                final Table.Builder tableBuilder = existingTable.toBuilder();
+                optionalEvolvedSchema.ifPresent(schema -> tableBuilder.setDefinition(createTableDefinition(schema, timePartitioning)));
+                optionalLabelMap.ifPresent(tableBuilder::setLabels);
+                tableBuilder.build().update();
+                tableUpdated = true;
+            } catch (BigQueryException e) {
+                final Table currentTable = _bigquery.getTable(tableId);
+                if (optionalEvolvedSchema.isPresent()) {
+                    final Schema evolvedSchema = optionalEvolvedSchema.get();
                     final Schema currentTableSchema = currentTable.getDefinition().getSchema();
                     if (evolvedSchema.equals(currentTableSchema)) {
                         LOG.info("Schema already evolved for table {}", tableId);
                         tableUpdated = true;
                     } else if (!existingTableSchema.equals(currentTableSchema)) {
                         LOG.warn("Concurrent table schema update exception encountered for table {}. Retrying update with new base schema...", tableId, e);
-                        tableUpdated = updateTable(tableId, desiredTableSchema, timePartitioning, currentTable, schemaEvolver);
+                        tableUpdated = updateTable(tableId, desiredTableSchema, timePartitioning, currentTable, schemaEvolver, labels);
                     } else {
                         LOG.error("Failed to update schema for table {}", tableId, e);
                         throw e;
                     }
+                } else {
+                    final Set<BigqueryLabel> currentLabels = currentTable.getLabels().entrySet().stream()
+                            .map(entry -> new BigqueryLabel(entry.getKey(), entry.getValue())).collect(Collectors.toSet());
+                    if (currentLabels.containsAll(labels)) {
+                        LOG.info("Labels already updated for table {}", tableId);
+                        tableUpdated = true;
+                    } else if (!existingTable.getLabels().equals(currentTable.getLabels())) {
+                        LOG.warn("Concurrent table label update exception encountered for table {}. Retrying update...", tableId, e);
+                        tableUpdated = updateTable(tableId, desiredTableSchema, timePartitioning, currentTable, schemaEvolver, labels);
+                    } else {
+                        LOG.error("Failed to update labels for table {}", tableId, e);
+                        throw e;
+                    }
                 }
-                LOG.debug("Table {} updated with evolved schema", tableId);
-            } else {
-                tableUpdated = false;
             }
         } else {
-            LOG.debug("Table {} already exist", tableId);
+            LOG.debug("No update required for table {}", tableId);
             tableUpdated = false;
         }
         return tableUpdated;
     }
 
-    private boolean createTable(final TableId tableId, final Schema desiredTableSchema, final TimePartitioning timePartitioning) {
-        final TableInfo tableInfo = TableInfo.newBuilder(tableId, createTableDefinition(desiredTableSchema, timePartitioning)).build();
+    private boolean createTable(final TableId tableId, final Schema desiredTableSchema, final TimePartitioning timePartitioning,
+                                final List<BigqueryLabel> labels) {
+        final Map<String, String> labelsMap = labels.stream().collect(Collectors.toMap(BigqueryLabel::getName, BigqueryLabel::getValue));
+        final TableInfo tableInfo = TableInfo.newBuilder(tableId, createTableDefinition(desiredTableSchema, timePartitioning))
+                .setLabels(labelsMap).build();
         try {
             _bigquery.create(tableInfo);
         } catch (BigQueryException e) {
@@ -188,7 +224,8 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
             if (datastreamConfiguration.isManageDestinationTable() && !insertErrors.isEmpty()) {
                 try {
                     final boolean tableUpdatedOrCreated = createOrUpdateTable(tableId, _destTableSchemas.get(destination),
-                            datastreamConfiguration.getSchemaEvolver(), datastreamConfiguration.getPartitionExpirationDays().orElse(null));
+                            datastreamConfiguration.getSchemaEvolver(), datastreamConfiguration.getPartitionExpirationDays().orElse(null),
+                            datastreamConfiguration.getLabels());
                     if (tableUpdatedOrCreated) {
                         LOG.info("Table created/updated for destination {}. Retrying batch...", destination);
                         insertErrors = insertRowsAndMapErrors(insertAllRequest);

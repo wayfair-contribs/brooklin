@@ -6,6 +6,9 @@
 package com.linkedin.datastream.bigquery;
 
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -21,6 +24,7 @@ public class BigqueryDatastreamConfiguration {
     private final Long _partitionExpirationDays;
     private final String _tableNameTemplate;
     private final BigqueryDatastreamConfiguration _exceptionsTableConfiguration;
+    private final List<BigqueryLabel> _labels;
 
     /**
      * Constructor.
@@ -32,12 +36,18 @@ public class BigqueryDatastreamConfiguration {
      */
     public BigqueryDatastreamConfiguration(final BigquerySchemaEvolver schemaEvolver, final boolean manageDestinationTable, final Long partitionExpirationDays,
                                            final String tableNameTemplate,
-                                           final BigqueryDatastreamConfiguration exceptionsTableConfiguration) {
+                                           final BigqueryDatastreamConfiguration exceptionsTableConfiguration,
+                                           final List<BigqueryLabel> labels) {
         _schemaEvolver = schemaEvolver;
         _manageDestinationTable = manageDestinationTable;
         _partitionExpirationDays = partitionExpirationDays;
         _tableNameTemplate = tableNameTemplate;
         _exceptionsTableConfiguration = exceptionsTableConfiguration;
+        if (labels != null) {
+            _labels = new ArrayList<>(labels);
+        } else {
+            _labels = Collections.emptyList();
+        }
     }
 
     /**
@@ -46,7 +56,7 @@ public class BigqueryDatastreamConfiguration {
      * @param manageDestinationTable should transport provider manage the destination table
      */
     public BigqueryDatastreamConfiguration(final BigquerySchemaEvolver schemaEvolver, final boolean manageDestinationTable) {
-        this(schemaEvolver, manageDestinationTable, null, null, null);
+        this(schemaEvolver, manageDestinationTable, null, null, null, null);
     }
 
     public Optional<Long> getPartitionExpirationDays() {
@@ -69,6 +79,10 @@ public class BigqueryDatastreamConfiguration {
         return Optional.ofNullable(_exceptionsTableConfiguration);
     }
 
+    public List<BigqueryLabel> getLabels() {
+        return Collections.unmodifiableList(_labels);
+    }
+
     @Override
     public boolean equals(final Object o) {
         if (this == o) {
@@ -80,11 +94,12 @@ public class BigqueryDatastreamConfiguration {
         return _schemaEvolver.equals(that._schemaEvolver) && _manageDestinationTable == that._manageDestinationTable
                 && Objects.equals(_partitionExpirationDays, that._partitionExpirationDays)
                 && Objects.equals(_tableNameTemplate, that._tableNameTemplate)
-                && Objects.equals(_exceptionsTableConfiguration, that._exceptionsTableConfiguration);
+                && Objects.equals(_exceptionsTableConfiguration, that._exceptionsTableConfiguration)
+                && Objects.equals(_labels, that._labels);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(_schemaEvolver, _manageDestinationTable, _partitionExpirationDays, _tableNameTemplate, _exceptionsTableConfiguration);
+        return Objects.hash(_schemaEvolver, _manageDestinationTable, _partitionExpirationDays, _tableNameTemplate, _exceptionsTableConfiguration, _labels);
     }
 }

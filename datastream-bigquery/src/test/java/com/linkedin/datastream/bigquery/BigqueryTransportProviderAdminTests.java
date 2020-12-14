@@ -13,9 +13,16 @@ import java.util.Map;
 import java.util.Set;
 
 import org.testng.annotations.BeforeMethod;
+import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
+
+import com.linkedin.data.template.StringMap;
 import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolver;
+import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolverFactory;
+import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolverType;
 import com.linkedin.datastream.common.Datastream;
 import com.linkedin.datastream.serde.Deserializer;
 import com.linkedin.datastream.server.DatastreamTask;
@@ -23,6 +30,7 @@ import com.linkedin.datastream.server.DatastreamTaskImpl;
 import com.linkedin.datastream.server.api.transport.TransportProvider;
 import com.linkedin.datastream.testutil.DatastreamTestUtils;
 
+import static com.linkedin.datastream.bigquery.BigqueryTransportProviderAdmin.METADATA_LABELS_KEY;
 import static org.mockito.Mockito.mock;
 
 import static org.mockito.Mockito.verify;
@@ -122,5 +130,59 @@ public class BigqueryTransportProviderAdminTests {
         verify(bigqueryTransportProvider).close();
         verify(bigqueryTransportProvider).getDestinations();
         assertTrue(datastreamConfigByDestination.isEmpty());
+    }
+
+    @DataProvider(name = "datastream config test cases")
+    public Object[][] datastreamConfigTestCases() {
+        return new Object[][] {
+                {
+                        BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.noop),
+                        Collections.emptyMap(), Collections.emptyMap(),
+                        new BigqueryDatastreamConfiguration(BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.noop), true)
+                },
+                {
+                        BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.simple),
+                        Collections.emptyMap(), Collections.emptyMap(),
+                        new BigqueryDatastreamConfiguration(BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.simple), true)
+                },
+                {
+                        BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.simple),
+                        ImmutableMap.of(
+                                METADATA_LABELS_KEY, "test,name:value"
+                        ), Collections.emptyMap(),
+                        new BigqueryDatastreamConfiguration(BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.simple), true,
+                                null, null, null, ImmutableList.of(BigqueryLabel.of("test"), BigqueryLabel.of("name", "value")))
+                },
+                {
+                        BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.simple),
+                        ImmutableMap.of(
+                        ), ImmutableMap.of(
+                            METADATA_LABELS_KEY, "test,name:value"
+                        ),
+                        new BigqueryDatastreamConfiguration(BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.simple), true,
+                                null, null, null, ImmutableList.of(BigqueryLabel.of("test"), BigqueryLabel.of("name", "value")))
+                }
+        };
+    }
+
+    @Test(dataProvider = "datastream config test cases")
+    public void testGetConfigurationFromDatastream(final BigquerySchemaEvolver defaultSchemaEvolver,
+                                                   final Map<String, String> defaultMetadata,
+                                                   final Map<String, String> datastreamMetadata,
+                                                   final BigqueryDatastreamConfiguration expectedConfiguration) {
+        final BigqueryTransportProviderAdmin admin = new BigqueryTransportProviderAdmin(
+                bufferedTransportProvider,
+                serializer,
+                deserializer,
+                defaultMetadata,
+                defaultSchemaEvolver,
+                datastreamConfigByDestination,
+                bigquerySchemaEvolverMap,
+                bigqueryTransportProviderFactory
+        );
+        final Datastream datastream = DatastreamTestUtils.createDatastreamWithoutDestination("connector", "test", "source");
+        datastream.setMetadata(new StringMap(datastreamMetadata));
+        final BigqueryDatastreamConfiguration config = admin.getConfigurationFromDatastream(datastream);
+        assertEquals(config, expectedConfiguration);
     }
 }

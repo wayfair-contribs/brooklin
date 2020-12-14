@@ -407,7 +407,7 @@ public class BigqueryTransportProviderTests {
         final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination(projectId, datasetName, tableName);
         final Map<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> destConfigs = new HashMap<>();
         final BigqueryDatastreamConfiguration config = new BigqueryDatastreamConfiguration(new SimpleBigquerySchemaEvolver(), true,
-                null, null, new BigqueryDatastreamConfiguration(new SimpleBigquerySchemaEvolver(), true));
+                null, null, new BigqueryDatastreamConfiguration(new SimpleBigquerySchemaEvolver(), true), null);
         destConfigs.put(destination, config);
 
         final BigqueryBatchCommitter committer = new BigqueryBatchCommitter(bigQuery, 1, destConfigs);
@@ -540,7 +540,7 @@ public class BigqueryTransportProviderTests {
         final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination(projectId, datasetName, tableName);
         final Map<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> destConfigs = new HashMap<>();
         final BigqueryDatastreamConfiguration config = new BigqueryDatastreamConfiguration(new SimpleBigquerySchemaEvolver(), true,
-                null, null, new BigqueryDatastreamConfiguration(new SimpleBigquerySchemaEvolver(), true));
+                null, null, new BigqueryDatastreamConfiguration(new SimpleBigquerySchemaEvolver(), true), null);
         destConfigs.put(destination, config);
 
         final BigqueryBatchCommitter committer = new BigqueryBatchCommitter(bigQuery, 1, destConfigs);

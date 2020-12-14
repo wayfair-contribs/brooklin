@@ -6,11 +6,14 @@
 package com.linkedin.datastream.bigquery;
 
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolver;
 import com.linkedin.datastream.bigquery.schema.SimpleBigquerySchemaEvolver;
@@ -18,6 +21,7 @@ import com.linkedin.datastream.common.Datastream;
 import com.linkedin.datastream.common.DatastreamDestination;
 import com.linkedin.datastream.serde.Deserializer;
 import com.linkedin.datastream.server.DatastreamTask;
+import com.linkedin.datastream.server.Pair;
 import com.linkedin.datastream.server.api.connector.DatastreamValidationException;
 import com.linkedin.datastream.server.api.transport.TransportProvider;
 import com.linkedin.datastream.server.api.transport.TransportProviderAdmin;
@@ -40,6 +44,7 @@ public class BigqueryTransportProviderAdmin implements TransportProviderAdmin {
     protected static final String METADATA_SCHEMA_EVOLVER_KEY = "schemaEvolver";
     protected static final String METADATA_EXCEPTIONS_TABLE_ENABLED_KEY = "exceptionsTableEnabled";
     protected static final String METADATA_MANAGE_DESTINATION_TABLE_KEY = "manageDestinationTable";
+    protected static final String METADATA_LABELS_KEY = "labels";
 
     private final BigqueryBufferedTransportProvider _bufferedTransportProvider;
     private final Serializer _valueSerializer;
@@ -178,7 +183,29 @@ public class BigqueryTransportProviderAdmin implements TransportProviderAdmin {
                 Optional.ofNullable(metadata.getOrDefault(METADATA_EXCEPTIONS_TABLE_ENABLED_KEY,
                         _defaultMetadata.get(METADATA_EXCEPTIONS_TABLE_ENABLED_KEY))).filter(Boolean::parseBoolean)
                         .map(enabled -> new BigqueryDatastreamConfiguration(new SimpleBigquerySchemaEvolver(), true))
-                        .orElse(null)
+                        .orElse(null),
+                Optional.ofNullable(metadata.getOrDefault(METADATA_LABELS_KEY, _defaultMetadata.get(METADATA_LABELS_KEY)))
+                        .map(this::parseLabelsString).orElse(null)
         );
     }
+
+    private List<BigqueryLabel> parseLabelsString(final String labelsString) {
+        // Parse to map first to find overlapping label names
+        final Map<String, String> labelsMap = Arrays.stream(labelsString.split(",")).map(label -> {
+            final String[] parts = label.split(":");
+            if (parts.length == 0 || parts.length > 2) {
+                throw new IllegalArgumentException("invalid label: " + label);
+            }
+            final String name = parts[0];
+            final String value;
+            if (parts.length == 2) {
+                value = parts[1];
+            } else {
+                value = "";
+            }
+            return Pair.of(name, value);
+        }).collect(Collectors.toMap(Pair::getKey, Pair::getValue));
+        return labelsMap.entrySet().stream().map(entry -> new BigqueryLabel(entry.getKey(), entry.getValue())).collect(Collectors.toList());
+    }
+
 }

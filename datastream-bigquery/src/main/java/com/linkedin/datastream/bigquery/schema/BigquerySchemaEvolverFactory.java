@@ -16,6 +16,9 @@ import com.linkedin.datastream.common.VerifiableProperties;
  */
 public class BigquerySchemaEvolverFactory {
 
+    private static final BigquerySchemaEvolver SIMPLE_SCHEMA_EVOLVER = new SimpleBigquerySchemaEvolver();
+    private static final BigquerySchemaEvolver NOOP_SCHEMA_EVOLVER = new NoOpBigquerySchemaEvolver();
+
     /**
      * A factory method that constructs a BigquerySchemaEvolver instance from properties.
      * @param properties the VerifiableProperties
@@ -35,10 +38,10 @@ public class BigquerySchemaEvolverFactory {
         final BigquerySchemaEvolver schemaEvolver;
         switch (schemaEvolverType) {
             case simple:
-                schemaEvolver = new SimpleBigquerySchemaEvolver();
+                schemaEvolver = SIMPLE_SCHEMA_EVOLVER;
                 break;
             case noop:
-                schemaEvolver = new NoOpBigquerySchemaEvolver();
+                schemaEvolver = NOOP_SCHEMA_EVOLVER;
                 break;
             default:
                 throw new IllegalStateException("Unsupported BigquerySchemaEvolverType: " + schemaEvolverType);

@@ -5,6 +5,26 @@
  */
 package com.linkedin.datastream.bigquery;
 
+import java.time.LocalDate;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
+
+import org.mockito.ArgumentCaptor;
+import org.testng.annotations.BeforeClass;
+import org.testng.annotations.BeforeMethod;
+import org.testng.annotations.Test;
+
 import com.codahale.metrics.MetricRegistry;
 import com.google.cloud.bigquery.BigQuery;
 import com.google.cloud.bigquery.BigQueryError;
@@ -22,39 +42,26 @@ import com.google.cloud.bigquery.TableInfo;
 import com.google.cloud.bigquery.TimePartitioning;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.ImmutableSet;
+
 import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolver;
 import com.linkedin.datastream.bigquery.schema.SimpleBigquerySchemaEvolver;
 import com.linkedin.datastream.common.DatastreamRecordMetadata;
 import com.linkedin.datastream.common.SendCallback;
 import com.linkedin.datastream.metrics.DynamicMetricsManager;
-import com.linkedin.datastream.server.Pair;
 import com.linkedin.datastream.server.api.transport.buffered.CommitCallback;
-import org.mockito.ArgumentCaptor;
-import org.testng.annotations.BeforeClass;
-import org.testng.annotations.BeforeMethod;
-import org.testng.annotations.Test;
 
-import java.time.LocalDate;
-import java.time.ZoneOffset;
-import java.time.format.DateTimeFormatter;
-import java.util.HashMap;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
-import java.util.stream.Stream;
-
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.any;
+import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertTrue;
 import static org.testng.Assert.assertFalse;
+import static org.testng.Assert.assertTrue;
 
 public class BigqueryBatchCommitterTests {
 
@@ -80,7 +87,8 @@ public class BigqueryBatchCommitterTests {
     public void testCreateTableOnCommit() throws InterruptedException {
         final TableId tableId = TableId.of("project_name", "dataset_name", "table_name");
         final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination(tableId.getProject(), tableId.getDataset(), tableId.getTable());
-        destinationConfiguraitons.put(destination, new BigqueryDatastreamConfiguration(schemaEvolver, true));
+        final List<BigqueryLabel> labels = Arrays.asList(BigqueryLabel.of("test"), BigqueryLabel.of("name", "value"));
+        destinationConfiguraitons.put(destination, new BigqueryDatastreamConfiguration(schemaEvolver, true, null, null, null, labels));
         final Schema schema = Schema.of(
                 Field.of("string", StandardSQLTypeName.STRING),
                 Field.of("int", StandardSQLTypeName.INT64)
@@ -118,7 +126,9 @@ public class BigqueryBatchCommitterTests {
         final TableDefinition tableDefinition = StandardTableDefinition.newBuilder().setSchema(schema)
                 .setTimePartitioning(TimePartitioning.of(TimePartitioning.Type.DAY))
                 .build();
-        final TableInfo tableInfo = TableInfo.newBuilder(tableId, tableDefinition).build();
+        final TableInfo tableInfo = TableInfo.newBuilder(tableId, tableDefinition)
+                .setLabels(labels.stream().collect(Collectors.toMap(BigqueryLabel::getName, BigqueryLabel::getValue)))
+                .build();
         when(bigQuery.create(tableInfo)).then(invocation -> {
             if (!tableCreated.get()) {
                 tableCreated.set(true);
@@ -255,7 +265,8 @@ public class BigqueryBatchCommitterTests {
     public void testEvolveTableSchemaOnCommit() throws InterruptedException {
         final TableId tableId = TableId.of("project_name", "dataset_name", "table_name");
         final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination(tableId.getProject(), tableId.getDataset(), tableId.getTable());
-        destinationConfiguraitons.put(destination, new BigqueryDatastreamConfiguration(schemaEvolver, true));
+        final List<BigqueryLabel> labels = Arrays.asList(BigqueryLabel.of("test"), BigqueryLabel.of("name", "value"));
+        destinationConfiguraitons.put(destination, new BigqueryDatastreamConfiguration(schemaEvolver, true, null, null, null, labels));
         final Schema newSchema = Schema.of(
                 Field.of("string", StandardSQLTypeName.STRING),
                 Field.of("int", StandardSQLTypeName.INT64),
@@ -271,6 +282,7 @@ public class BigqueryBatchCommitterTests {
         final Table existingTable = mock(Table.class);
 
         when(existingTable.getDefinition()).thenReturn(existingTableDefinition);
+        when(existingTable.getLabels()).thenReturn(Collections.emptyMap());
 
         final Schema evolvedSchema = schemaEvolver.evolveSchema(existingSchema, newSchema);
         final TableDefinition evolvedTableDefinition = StandardTableDefinition.newBuilder()
@@ -280,6 +292,8 @@ public class BigqueryBatchCommitterTests {
         final Table.Builder tableBuilder = mock(Table.Builder.class);
         when(existingTable.toBuilder()).thenReturn(tableBuilder);
         when(tableBuilder.setDefinition(evolvedTableDefinition)).thenReturn(tableBuilder);
+        final Map<String, String> labelsMap = labels.stream().collect(Collectors.toMap(BigqueryLabel::getName, BigqueryLabel::getValue));
+        when(tableBuilder.setLabels(labelsMap)).thenReturn(tableBuilder);
 
         final Table evolvedTable = mock(Table.class);
         when(tableBuilder.build()).thenReturn(evolvedTable);
@@ -331,6 +345,7 @@ public class BigqueryBatchCommitterTests {
         verify(bigQuery).getTable(tableId);
         verify(bigQuery, never()).create(any(TableInfo.class));
         verify(tableBuilder).setDefinition(evolvedTableDefinition);
+        verify(tableBuilder).setLabels(labelsMap);
         verify(evolvedTable).update();
 
         verify(bigQuery, times(2)).insertAll(insertAllRequest);

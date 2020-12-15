@@ -97,17 +97,6 @@ public class Batch extends AbstractBatch {
             }
 
             if (_destination == null) {
-//                String[] datasetRetentionTableSuffix = aPackage.getDestination().split("/");
-//                if (datasetRetentionTableSuffix.length == 3) {
-//                    _destination = datasetRetentionTableSuffix[0] +
-//                            "/" + aPackage.getTopic() + datasetRetentionTableSuffix[2] +
-//                            "/" + datasetRetentionTableSuffix[1];
-//                } else {
-//                    _destination = datasetRetentionTableSuffix[0] +
-//                            "/" + aPackage.getTopic() +
-//                            "/" + datasetRetentionTableSuffix[1];
-//                }
-//                _committer.setDestTableSchemaEvolver(_destination, _schemaEvolver);
                 _destination = aPackage.getDestination();
             }
 

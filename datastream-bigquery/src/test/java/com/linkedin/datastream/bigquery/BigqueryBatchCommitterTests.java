@@ -19,6 +19,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import org.mockito.ArgumentCaptor;
 import org.testng.annotations.BeforeClass;
@@ -588,4 +589,105 @@ public class BigqueryBatchCommitterTests {
 
         verify(bigQuery, times(2)).insertAll(insertAllRequest);
     }
+
+    @Test
+    public void testPayloadSizeLimitRetry() {
+        final TableId tableId = TableId.of("dataset", "table");
+        final List<InsertAllRequest.RowToInsert> batch = IntStream.range(0, 10)
+                .mapToObj(i -> InsertAllRequest.RowToInsert.of(ImmutableMap.of("f1", "test" + i)))
+                .collect(Collectors.toList());
+        final InsertAllResponse response = mock(InsertAllResponse.class);
+        when(response.hasErrors()).thenReturn(false);
+        when(response.getInsertErrors()).thenReturn(Collections.emptyMap());
+        when(bigQuery.insertAll(any(InsertAllRequest.class)))
+                .thenThrow(new BigQueryException(400, "Request payload size exceeds the limit"))
+                .thenReturn(response);
+        final Map<Integer, Exception> insertErrors = batchCommitter.insertRowsAndMapErrorsWithRetry(tableId, batch);
+        verify(bigQuery).insertAll(InsertAllRequest.of(tableId, batch));
+        verify(bigQuery).insertAll(InsertAllRequest.of(tableId, batch.subList(0, batch.size() / 2)));
+        verify(bigQuery).insertAll(InsertAllRequest.of(tableId, batch.subList(batch.size() / 2, batch.size())));
+        assertTrue(insertErrors.isEmpty());
+    }
+
+    @Test
+    public void testBatchSizeLimitRetry() {
+        final TableId tableId = TableId.of("dataset", "table");
+        final List<InsertAllRequest.RowToInsert> batch = IntStream.range(0, 10)
+                .mapToObj(i -> InsertAllRequest.RowToInsert.of(ImmutableMap.of("f1", "test" + i)))
+                .collect(Collectors.toList());
+        final InsertAllResponse response = mock(InsertAllResponse.class);
+        when(response.hasErrors()).thenReturn(false);
+        when(response.getInsertErrors()).thenReturn(Collections.emptyMap());
+        when(bigQuery.insertAll(any(InsertAllRequest.class)))
+                .thenThrow(new BigQueryException(400, "too many rows present in the request"))
+                .thenReturn(response);
+        final Map<Integer, Exception> insertErrors = batchCommitter.insertRowsAndMapErrorsWithRetry(tableId, batch);
+        verify(bigQuery).insertAll(InsertAllRequest.of(tableId, batch));
+        verify(bigQuery).insertAll(InsertAllRequest.of(tableId, batch.subList(0, batch.size() / 2)));
+        verify(bigQuery).insertAll(InsertAllRequest.of(tableId, batch.subList(batch.size() / 2, batch.size())));
+        assertTrue(insertErrors.isEmpty());
+    }
+
+    @Test
+    public void testBatchSizeLimitRetryRemappedRowErrorIndex() {
+        final TableId tableId = TableId.of("dataset", "table");
+        final List<InsertAllRequest.RowToInsert> batch = IntStream.range(0, 10)
+                .mapToObj(i -> InsertAllRequest.RowToInsert.of(ImmutableMap.of("f1", "test" + i)))
+                .collect(Collectors.toList());
+        final InsertAllResponse response = mock(InsertAllResponse.class);
+        when(response.hasErrors()).thenReturn(false);
+        when(response.getInsertErrors()).thenReturn(Collections.emptyMap());
+        final BigQueryException batchException = new BigQueryException(400, "too many rows present in the request");
+        when(bigQuery.insertAll(any(InsertAllRequest.class)))
+                .thenThrow(batchException, batchException)
+                .thenThrow(new RuntimeException("non-batch size limit exception"));
+        final Map<Integer, Exception> insertErrors = batchCommitter.insertRowsAndMapErrorsWithRetry(tableId, batch);
+        verify(bigQuery).insertAll(InsertAllRequest.of(tableId, batch));
+        verify(bigQuery).insertAll(InsertAllRequest.of(tableId, batch.subList(0, batch.size() / 2)));
+        verify(bigQuery).insertAll(InsertAllRequest.of(tableId, batch.subList(0, batch.size() / 4)));
+        verify(bigQuery).insertAll(InsertAllRequest.of(tableId, batch.subList(batch.size() / 4, batch.size() / 2)));
+        verify(bigQuery).insertAll(InsertAllRequest.of(tableId, batch.subList(batch.size() / 2, batch.size())));
+        assertEquals(insertErrors.keySet(), IntStream.range(0, batch.size()).boxed().collect(Collectors.toSet()));
+    }
+
+    @Test
+    public void testBatchSizeLimitRetryMultipleTimes() {
+        final TableId tableId = TableId.of("dataset", "table");
+        final List<InsertAllRequest.RowToInsert> batch = IntStream.range(0, 10)
+                .mapToObj(i -> InsertAllRequest.RowToInsert.of(ImmutableMap.of("f1", "test" + i)))
+                .collect(Collectors.toList());
+        final InsertAllResponse response = mock(InsertAllResponse.class);
+        when(response.hasErrors()).thenReturn(false);
+        when(response.getInsertErrors()).thenReturn(Collections.emptyMap());
+        final Exception exception = new BigQueryException(400, "too many rows present in the request");
+        when(bigQuery.insertAll(any(InsertAllRequest.class)))
+                .thenThrow(exception, exception)
+                .thenReturn(response);
+        final Map<Integer, Exception> insertErrors = batchCommitter.insertRowsAndMapErrorsWithRetry(tableId, batch);
+        verify(bigQuery).insertAll(InsertAllRequest.of(tableId, batch));
+        verify(bigQuery).insertAll(InsertAllRequest.of(tableId, batch.subList(0, batch.size() / 2)));
+        verify(bigQuery).insertAll(InsertAllRequest.of(tableId, batch.subList(0, batch.size() / 4)));
+        verify(bigQuery).insertAll(InsertAllRequest.of(tableId, batch.subList(batch.size() / 4, batch.size() / 2)));
+        verify(bigQuery).insertAll(InsertAllRequest.of(tableId, batch.subList(batch.size() / 2, batch.size())));
+        assertTrue(insertErrors.isEmpty());
+    }
+
+    @Test
+    public void testBatchSizeLimitRetryInfiniteRecursionExit() {
+        final TableId tableId = TableId.of("dataset", "table");
+        final List<InsertAllRequest.RowToInsert> batch = IntStream.range(0, 10)
+                .mapToObj(i -> InsertAllRequest.RowToInsert.of(ImmutableMap.of("f1", "test" + i)))
+                .collect(Collectors.toList());
+        final InsertAllResponse response = mock(InsertAllResponse.class);
+        when(response.hasErrors()).thenReturn(false);
+        when(response.getInsertErrors()).thenReturn(Collections.emptyMap());
+        final Exception exception = new BigQueryException(400, "too many rows present in the request");
+        when(bigQuery.insertAll(any(InsertAllRequest.class)))
+                .thenThrow(exception);
+        final Map<Integer, Exception> insertErrors = batchCommitter.insertRowsAndMapErrorsWithRetry(tableId, batch);
+        verify(bigQuery, times(19)).insertAll(any(InsertAllRequest.class));
+        assertEquals(insertErrors.keySet(), IntStream.range(0, batch.size()).boxed().collect(Collectors.toSet()));
+        insertErrors.values().stream().map(Exception::getCause).forEach(e -> assertEquals(e, exception));
+    }
+
 }

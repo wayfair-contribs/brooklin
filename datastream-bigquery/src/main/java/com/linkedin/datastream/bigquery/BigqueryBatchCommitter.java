@@ -10,6 +10,8 @@ import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -194,6 +196,7 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
                        List<Long> sourceTimestamps,
                        CommitCallback callback) {
         if (batch.isEmpty()) {
+            callback.commited();
             return;
         }
 
@@ -212,13 +215,11 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
 
             LOG.debug("Committing a batch to project {}, dataset {}, and table {}", tableId.getProject(), tableId.getDataset(), tableId.getTable());
 
-            final InsertAllRequest insertAllRequest = InsertAllRequest.newBuilder(insertTableId, batch).build();
-
             final long start = System.currentTimeMillis();
-            Map<Integer, Exception> insertErrors = insertRowsAndMapErrors(insertAllRequest);
+            Map<Integer, Exception> insertErrors = insertRowsAndMapErrorsWithRetry(insertTableId, batch);
             final long end = System.currentTimeMillis();
-            DynamicMetricsManager.getInstance().createOrUpdateHistogram(classSimpleName, recordMetadata.get(0).getTopic(),
-                    "insertAllExecTime", end - start);
+            DynamicMetricsManager.getInstance()
+                    .createOrUpdateHistogram(this.getClass().getSimpleName(), recordMetadata.get(0).getTopic(), "insertAllExecTime", end - start);
 
             // If we manage the destination table and encountered insert errors, try creating/updating the destination table before retrying
             if (datastreamConfiguration.isManageDestinationTable() && !insertErrors.isEmpty()) {
@@ -228,7 +229,7 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
                             datastreamConfiguration.getLabels());
                     if (tableUpdatedOrCreated) {
                         LOG.info("Table created/updated for destination {}. Retrying batch...", destination);
-                        insertErrors = insertRowsAndMapErrors(insertAllRequest);
+                        insertErrors = insertRowsAndMapErrorsWithRetry(insertTableId, batch);
                     }
                 } catch (final Exception e) {
                     insertErrors = IntStream.range(0, batch.size()).boxed().collect(Collectors.toMap(i -> i, i -> e));
@@ -261,19 +262,59 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
         _executor.execute(committerTask);
     }
 
-    private Map<Integer, Exception> insertRowsAndMapErrors(final InsertAllRequest insertAllRequest) {
+    Map<Integer, Exception> insertRowsAndMapErrorsWithRetry(final TableId insertTableId, final List<InsertAllRequest.RowToInsert> batch) {
         Map<Integer, Exception> insertErrors;
-        try {
-            final InsertAllResponse response = _bigquery.insertAll(insertAllRequest);
-            insertErrors = response.getInsertErrors().entrySet().stream().collect(Collectors.toMap(
-                    entry -> entry.getKey().intValue(),
-                    entry -> new TransientStreamingInsertException(entry.getValue().toString())
-            ));
-        } catch (final Exception e) {
-            final TransientStreamingInsertException wrappedException = new TransientStreamingInsertException(e);
-            insertErrors = IntStream.range(0, insertAllRequest.getRows().size()).boxed().collect(Collectors.toMap(i -> i, i -> wrappedException));
+        if (batch.size() > 1) {
+            try {
+                final InsertAllResponse response = _bigquery.insertAll(InsertAllRequest.newBuilder(insertTableId, batch).build());
+                insertErrors = response.getInsertErrors().entrySet().stream().collect(Collectors.toMap(
+                        entry -> entry.getKey().intValue(),
+                        entry -> new TransientStreamingInsertException(entry.getValue().toString())
+                ));
+            } catch (final Exception e) {
+                if (isBatchSizeLimitException(e)) {
+                    LOG.warn("Batch size limit hit for table {} with batch size of {}. Retrying with reduced batch sizes...", insertTableId, batch.size(), e);
+                    final int halfIndex = batch.size() / 2;
+                    final Map<Integer, Exception> firstBatchErrors = insertRowsAndMapErrorsWithRetry(insertTableId, batch.subList(0, halfIndex));
+                    final Map<Integer, Exception> secondBatchErrors = insertRowsAndMapErrorsWithRetry(insertTableId, batch.subList(halfIndex, batch.size()));
+                    insertErrors = new HashMap<>(firstBatchErrors);
+                    for (Map.Entry<Integer, Exception> entry : secondBatchErrors.entrySet()) {
+                        insertErrors.put(entry.getKey() + halfIndex, entry.getValue());
+                    }
+                } else {
+                    final TransientStreamingInsertException wrappedException = new TransientStreamingInsertException(e);
+                    insertErrors = IntStream.range(0, batch.size()).boxed().collect(Collectors.toMap(i -> i, i -> wrappedException));
+                }
+            }
+        } else {
+            insertErrors = insertRowsAndMapErrors(insertTableId, batch);
         }
         return insertErrors;
+    }
+
+    private Map<Integer, Exception> insertRowsAndMapErrors(final TableId insertTableId, final List<InsertAllRequest.RowToInsert> batch) {
+        Map<Integer, Exception> insertErrors;
+        if (!batch.isEmpty()) {
+            try {
+                final InsertAllResponse response = _bigquery.insertAll(InsertAllRequest.newBuilder(insertTableId, batch).build());
+                insertErrors = response.getInsertErrors().entrySet().stream().collect(Collectors.toMap(
+                        entry -> entry.getKey().intValue(),
+                        entry -> new TransientStreamingInsertException(entry.getValue().toString())
+                ));
+            } catch (final Exception e) {
+                final TransientStreamingInsertException wrappedException = new TransientStreamingInsertException(e);
+                insertErrors = IntStream.range(0, batch.size()).boxed().collect(Collectors.toMap(i -> i, i -> wrappedException));
+            }
+        } else {
+            insertErrors = Collections.emptyMap();
+        }
+        return insertErrors;
+    }
+
+    private static boolean isBatchSizeLimitException(final Exception e) {
+        final String message = e.getMessage();
+        return message != null &&
+                (message.startsWith("Request payload size exceeds the limit") || message.startsWith("too many rows present in the request"));
     }
 
     @Override

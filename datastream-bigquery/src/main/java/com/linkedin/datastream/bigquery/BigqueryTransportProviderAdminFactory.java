@@ -128,7 +128,8 @@ public class BigqueryTransportProviderAdminFactory implements TransportProviderA
                         .orElseGet(() -> BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.noop));
             }
 
-            final int maxBatchSize = tpProperties.getInt(CONFIG_MAX_BATCH_SIZE, 100000);
+            // Adjusted default max batch size to 500 based on Google's recommendation: https://cloud.google.com/bigquery/quotas#streaming_inserts
+            final int maxBatchSize = tpProperties.getInt(CONFIG_MAX_BATCH_SIZE, 500);
             final int maxInFlightCommits = tpProperties.getInt(CONFIG_MAX_INFLIGHT_COMMITS, 1);
             final int batchQueueSize = tpProperties.getInt(CONFIG_BATCHBUILDER_QUEUE_SIZE, 1000);
             final int batchBuilderCount = tpProperties.getInt(CONFIG_BATCHBUILDER_THREAD_COUNT, 5);

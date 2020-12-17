@@ -16,7 +16,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolver;
-import com.linkedin.datastream.bigquery.schema.SimpleBigquerySchemaEvolver;
+import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolverFactory;
+import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolverType;
 import com.linkedin.datastream.common.Datastream;
 import com.linkedin.datastream.common.DatastreamDestination;
 import com.linkedin.datastream.serde.Deserializer;
@@ -182,8 +183,9 @@ public class BigqueryTransportProviderAdmin implements TransportProviderAdmin {
                                 .map(suffix -> "%s" + suffix).orElse(null)),
                 Optional.ofNullable(metadata.getOrDefault(METADATA_EXCEPTIONS_TABLE_ENABLED_KEY,
                         _defaultMetadata.get(METADATA_EXCEPTIONS_TABLE_ENABLED_KEY))).filter(Boolean::parseBoolean)
-                        .map(enabled -> new BigqueryDatastreamConfiguration(new SimpleBigquerySchemaEvolver(), true))
-                        .orElse(null),
+                        .map(enabled -> new BigqueryDatastreamConfiguration(
+                                BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.simple), true
+                                )).orElse(null),
                 Optional.ofNullable(metadata.getOrDefault(METADATA_LABELS_KEY, _defaultMetadata.get(METADATA_LABELS_KEY)))
                         .map(this::parseLabelsString).orElse(null)
         );

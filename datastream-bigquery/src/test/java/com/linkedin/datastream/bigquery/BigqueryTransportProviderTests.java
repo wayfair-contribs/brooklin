@@ -21,7 +21,9 @@ import com.google.cloud.bigquery.TableInfo;
 import com.google.cloud.bigquery.TimePartitioning;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import com.linkedin.datastream.bigquery.schema.SimpleBigquerySchemaEvolver;
+
+import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolverFactory;
+import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolverType;
 import com.linkedin.datastream.bigquery.translator.RecordTranslator;
 import com.linkedin.datastream.bigquery.translator.SchemaTranslator;
 import com.linkedin.datastream.common.BrooklinEnvelope;
@@ -116,7 +118,7 @@ public class BigqueryTransportProviderTests {
         final String tableName = BigqueryBatchCommitter.sanitizeTableName(topicName);
         final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination(projectId, datasetName, tableName);
         final Map<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> destConfigs = new HashMap<>();
-        final BigqueryDatastreamConfiguration config = new BigqueryDatastreamConfiguration(new SimpleBigquerySchemaEvolver(), true);
+        final BigqueryDatastreamConfiguration config = new BigqueryDatastreamConfiguration(BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.simple), true);
         destConfigs.put(destination, config);
 
         final BigqueryBatchCommitter committer = new BigqueryBatchCommitter(bigQuery, 1, destConfigs);
@@ -209,9 +211,9 @@ public class BigqueryTransportProviderTests {
         final String topicName = getUniqueTopicName();
         final String tableName = BigqueryBatchCommitter.sanitizeTableName(topicName);
         final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination(projectId, datasetName, tableName);
-        final BigqueryDatastreamConfiguration config = new BigqueryDatastreamConfiguration(new SimpleBigquerySchemaEvolver(), true);
+        final BigqueryDatastreamConfiguration config = new BigqueryDatastreamConfiguration(BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.simple), true);
         final Map<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> destConfigs = new HashMap<>();
-        destConfigs.put(destination, new BigqueryDatastreamConfiguration(new SimpleBigquerySchemaEvolver(), true));
+        destConfigs.put(destination, new BigqueryDatastreamConfiguration(BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.simple), true));
 
         final BigqueryBatchCommitter committer = new BigqueryBatchCommitter(bigQuery, 1, destConfigs);
         final BatchBuilder batchBuilder = new BatchBuilder(
@@ -312,7 +314,7 @@ public class BigqueryTransportProviderTests {
         final String tableName = BigqueryBatchCommitter.sanitizeTableName(topicName);
         final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination(projectId, datasetName, tableName);
         final Map<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> destConfigs = new HashMap<>();
-        final BigqueryDatastreamConfiguration config = new BigqueryDatastreamConfiguration(new SimpleBigquerySchemaEvolver(), true);
+        final BigqueryDatastreamConfiguration config = new BigqueryDatastreamConfiguration(BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.simple), true);
         destConfigs.put(destination, config);
 
         final BigqueryBatchCommitter committer = new BigqueryBatchCommitter(bigQuery, 1, destConfigs);
@@ -406,8 +408,8 @@ public class BigqueryTransportProviderTests {
         final String tableName = BigqueryBatchCommitter.sanitizeTableName(topicName);
         final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination(projectId, datasetName, tableName);
         final Map<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> destConfigs = new HashMap<>();
-        final BigqueryDatastreamConfiguration config = new BigqueryDatastreamConfiguration(new SimpleBigquerySchemaEvolver(), true,
-                null, null, new BigqueryDatastreamConfiguration(new SimpleBigquerySchemaEvolver(), true), null);
+        final BigqueryDatastreamConfiguration config = new BigqueryDatastreamConfiguration(BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.simple), true,
+                null, null, new BigqueryDatastreamConfiguration(BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.simple), true), null);
         destConfigs.put(destination, config);
 
         final BigqueryBatchCommitter committer = new BigqueryBatchCommitter(bigQuery, 1, destConfigs);
@@ -506,7 +508,7 @@ public class BigqueryTransportProviderTests {
             verify(bigQuery, never()).create(tableInfo);
             verify(bigQuery, atLeastOnce()).getTable(tableId);
             verify(bigQuery, never()).create(exceptionsTableInfo);
-            verify(bigQuery, never()).getTable(exceptionsTableId);
+            verify(bigQuery).getTable(exceptionsTableId);
             assertEquals(insertedErrors.size(), incompatibleEvents.size());
             assertEquals(callbackExceptions.size(), 0);
         }
@@ -539,8 +541,8 @@ public class BigqueryTransportProviderTests {
         final String tableName = BigqueryBatchCommitter.sanitizeTableName(topicName);
         final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination(projectId, datasetName, tableName);
         final Map<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> destConfigs = new HashMap<>();
-        final BigqueryDatastreamConfiguration config = new BigqueryDatastreamConfiguration(new SimpleBigquerySchemaEvolver(), true,
-                null, null, new BigqueryDatastreamConfiguration(new SimpleBigquerySchemaEvolver(), true), null);
+        final BigqueryDatastreamConfiguration config = new BigqueryDatastreamConfiguration(BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.simple), true,
+                null, null, new BigqueryDatastreamConfiguration(BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.simple), true), null);
         destConfigs.put(destination, config);
 
         final BigqueryBatchCommitter committer = new BigqueryBatchCommitter(bigQuery, 1, destConfigs);

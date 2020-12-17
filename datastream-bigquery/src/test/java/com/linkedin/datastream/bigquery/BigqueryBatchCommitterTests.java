@@ -45,6 +45,8 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 
 import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolver;
+import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolverFactory;
+import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolverType;
 import com.linkedin.datastream.bigquery.schema.SimpleBigquerySchemaEvolver;
 import com.linkedin.datastream.common.DatastreamRecordMetadata;
 import com.linkedin.datastream.common.SendCallback;
@@ -79,7 +81,7 @@ public class BigqueryBatchCommitterTests {
     @BeforeMethod
     void beforeTest() {
         bigQuery = mock(BigQuery.class);
-        schemaEvolver = new SimpleBigquerySchemaEvolver();
+        schemaEvolver = BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.simple);
         destinationConfiguraitons = new HashMap<>();
         batchCommitter = new BigqueryBatchCommitter(bigQuery, 1, destinationConfiguraitons);
     }
@@ -151,7 +153,7 @@ public class BigqueryBatchCommitterTests {
 
         verify(bigQuery).getTable(tableId);
         verify(bigQuery).create(tableInfo);
-        verify(bigQuery, times(2)).insertAll(insertAllRequest);
+        verify(bigQuery).insertAll(insertAllRequest);
         verify(mockedRowCallback).onCompletion(metadata.get(0), null);
     }
 
@@ -195,7 +197,7 @@ public class BigqueryBatchCommitterTests {
                 ImmutableList.of(), commitCallback);
         latch.await(1, TimeUnit.SECONDS);
 
-        verify(bigQuery).getTable(tableId);
+        verify(bigQuery, times(2)).getTable(tableId);
         verify(bigQuery).insertAll(any(InsertAllRequest.class));
 
         final ArgumentCaptor<Exception> exceptionArgumentCaptor = ArgumentCaptor.forClass(Exception.class);
@@ -349,7 +351,7 @@ public class BigqueryBatchCommitterTests {
         verify(tableBuilder).setLabels(labelsMap);
         verify(evolvedTable).update();
 
-        verify(bigQuery, times(2)).insertAll(insertAllRequest);
+        verify(bigQuery).insertAll(insertAllRequest);
     }
 
     @Test
@@ -465,9 +467,9 @@ public class BigqueryBatchCommitterTests {
 
         latch.await(1, TimeUnit.SECONDS);
 
-        verify(bigQuery, times(2)).getTable(tableId);
+        verify(bigQuery, times(4)).getTable(tableId);
         verify(bigQuery, never()).create(any(TableInfo.class));
-        verify(tableBuilder).setDefinition(evolvedTableDefinition);
+        verify(tableBuilder, times(2)).setDefinition(evolvedTableDefinition);
         verify(bigQuery).insertAll(any(InsertAllRequest.class));
 
         final ArgumentCaptor<Exception> exceptionArgumentCaptor = ArgumentCaptor.forClass(Exception.class);
@@ -587,7 +589,7 @@ public class BigqueryBatchCommitterTests {
         verify(tableBuilder2).setDefinition(evolvedTableDefinition2);
         verify(evolvedTable2).update();
 
-        verify(bigQuery, times(2)).insertAll(insertAllRequest);
+        verify(bigQuery).insertAll(insertAllRequest);
     }
 
     @Test

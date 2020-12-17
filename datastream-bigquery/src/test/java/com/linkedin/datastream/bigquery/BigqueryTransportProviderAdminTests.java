@@ -30,6 +30,7 @@ import com.linkedin.datastream.server.DatastreamTaskImpl;
 import com.linkedin.datastream.server.api.transport.TransportProvider;
 import com.linkedin.datastream.testutil.DatastreamTestUtils;
 
+import static com.linkedin.datastream.bigquery.BigqueryTransportProviderAdmin.METADATA_EXCEPTIONS_TABLE_ENABLED_KEY;
 import static com.linkedin.datastream.bigquery.BigqueryTransportProviderAdmin.METADATA_LABELS_KEY;
 import static org.mockito.Mockito.mock;
 
@@ -161,7 +162,21 @@ public class BigqueryTransportProviderAdminTests {
                         ),
                         new BigqueryDatastreamConfiguration(BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.simple), true,
                                 null, null, null, ImmutableList.of(BigqueryLabel.of("test"), BigqueryLabel.of("name", "value")))
-                }
+                },
+                {
+                        BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.simple),
+                        ImmutableMap.of(
+                                METADATA_EXCEPTIONS_TABLE_ENABLED_KEY, "true"
+                        ), Collections.emptyMap(),
+                        new BigqueryDatastreamConfiguration(BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.simple), true,
+                                null, null, new BigqueryDatastreamConfiguration(BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.simple), true), null)
+                },
+                {
+                        BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.simple),
+                        ImmutableMap.of(), ImmutableMap.of(METADATA_EXCEPTIONS_TABLE_ENABLED_KEY, "true"),
+                        new BigqueryDatastreamConfiguration(BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.simple), true,
+                                null, null, new BigqueryDatastreamConfiguration(BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.simple), true), null)
+                },
         };
     }
 

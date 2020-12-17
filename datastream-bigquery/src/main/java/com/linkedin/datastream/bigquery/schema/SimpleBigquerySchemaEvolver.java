@@ -25,6 +25,8 @@ import com.google.common.collect.ImmutableList;
  */
 public class SimpleBigquerySchemaEvolver implements BigquerySchemaEvolver {
 
+    protected SimpleBigquerySchemaEvolver() { }
+
     @Override
     public Schema evolveSchema(final Schema baseSchema, final Schema newSchema) throws IncompatibleSchemaEvolutionException {
         return Schema.of(mergeFields(baseSchema.getFields(), newSchema.getFields()));

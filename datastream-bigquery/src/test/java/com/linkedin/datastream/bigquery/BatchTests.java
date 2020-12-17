@@ -7,6 +7,8 @@ package com.linkedin.datastream.bigquery;
 
 import com.codahale.metrics.MetricRegistry;
 import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolver;
+import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolverFactory;
+import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolverType;
 import com.linkedin.datastream.bigquery.schema.SimpleBigquerySchemaEvolver;
 import com.linkedin.datastream.bigquery.translator.SchemaTranslator;
 import com.linkedin.datastream.common.Package;
@@ -49,7 +51,7 @@ public class BatchTests {
         final Deserializer deserializer = new KafkaDeserializer(new KafkaAvroDeserializer(schemaRegistryClient));
         serializer = new KafkaAvroSerializer(schemaRegistryClient);
         committer = mock(BigqueryBatchCommitter.class);
-        schemaEvolver = new SimpleBigquerySchemaEvolver();
+        schemaEvolver = BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.simple);
         batch = new Batch(10, 10000, 1, deserializer, committer, schemaEvolver);
     }
 

@@ -77,7 +77,6 @@ public class BatchBuilder extends AbstractBatchBuilder {
                         entry.getValue().write(aPackage);
                     }
                 }
-                aPackage.markAsDelivered();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 break;
@@ -89,11 +88,15 @@ public class BatchBuilder extends AbstractBatchBuilder {
                             "errorCount",
                             1);
                     LOG.error("Unable to write to batch", e);
-                    aPackage.getAckCallback().onCompletion(new DatastreamRecordMetadata(
-                            aPackage.getCheckpoint(), aPackage.getTopic(), aPackage.getPartition()), e);
+                    aPackage.getAckCallback().onCompletion(
+                            new DatastreamRecordMetadata(aPackage.getCheckpoint(), aPackage.getTopic(), aPackage.getPartition()),
+                            e
+                    );
                 } else {
                     LOG.error("Unable to process flush signal", e);
                 }
+            } finally {
+                aPackage.markAsDelivered();
             }
         }
         LOG.info("Batch builder stopped.");

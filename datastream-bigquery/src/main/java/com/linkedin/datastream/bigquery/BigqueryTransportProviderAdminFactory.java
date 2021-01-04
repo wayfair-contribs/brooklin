@@ -68,6 +68,8 @@ public class BigqueryTransportProviderAdminFactory implements TransportProviderA
 
     private static final String CONFIG_COMMITTER_DOMAIN_PREFIX = "committer";
     private static final String CONFIG_COMMITTER_THREADS = "threads";
+    private static final String CONFIG_COMMITTER_PROJECT_ID = "projectId";
+    private static final String CONFIG_COMMITTER_CREDENTIALS_PATH = "credentialsPath";
 
     private static final String CONFIG_SCHEMA_EVOLVERS_DOMAIN_PREFIX = "schemaEvolvers";
 
@@ -83,8 +85,9 @@ public class BigqueryTransportProviderAdminFactory implements TransportProviderA
         final BigqueryBatchCommitter committer;
         {
             final VerifiableProperties committerProperties = new VerifiableProperties(tpProperties.getDomainProperties(CONFIG_COMMITTER_DOMAIN_PREFIX));
-            final BigQuery bigQuery = constructBigQueryClientFromProperties(committerProperties);
-            committerProjectId = committerProperties.getString("projectId");
+            committerProjectId = committerProperties.getString(CONFIG_COMMITTER_PROJECT_ID);
+            final String committerCredentialsPath = committerProperties.getString(CONFIG_COMMITTER_CREDENTIALS_PATH);
+            final BigQuery bigQuery = constructBigQueryClient(committerProjectId, committerCredentialsPath);
             final int committerThreads = committerProperties.getInt(CONFIG_COMMITTER_THREADS, 1);
             committer = new BigqueryBatchCommitter(bigQuery, committerThreads, datastreamConfigByDestination);
         }
@@ -150,9 +153,7 @@ public class BigqueryTransportProviderAdminFactory implements TransportProviderA
                 defaultSchemaEvolver, datastreamConfigByDestination, bigquerySchemaEvolverMap, new BigqueryTransportProviderFactory());
     }
 
-    private BigQuery constructBigQueryClientFromProperties(final VerifiableProperties properties) {
-        String credentialsPath = properties.getString("credentialsPath");
-        String projectId = properties.getString("projectId");
+    private BigQuery constructBigQueryClient(final String projectId, final String credentialsPath) {
         try {
             Credentials credentials = GoogleCredentials
                     .fromStream(new FileInputStream(credentialsPath));

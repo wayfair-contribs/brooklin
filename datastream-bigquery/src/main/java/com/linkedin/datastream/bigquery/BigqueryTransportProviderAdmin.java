@@ -15,6 +15,8 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
+import org.apache.commons.lang3.StringUtils;
+
 import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolver;
 import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolverFactory;
 import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolverType;
@@ -26,6 +28,7 @@ import com.linkedin.datastream.server.Pair;
 import com.linkedin.datastream.server.api.connector.DatastreamValidationException;
 import com.linkedin.datastream.server.api.transport.TransportProvider;
 import com.linkedin.datastream.server.api.transport.TransportProviderAdmin;
+
 
 /**
  * {@link TransportProviderAdmin} implementation for {@link BigqueryTransportProvider}
@@ -135,13 +138,15 @@ public class BigqueryTransportProviderAdmin implements TransportProviderAdmin {
                 throw new DatastreamValidationException("Bigquery datastream destination is malformed", e);
             }
         } else {
-            if (!datastream.getMetadata().containsKey("dataset")) {
+            final String projectId = datastream.getMetadata().getOrDefault(METADATA_PROJECT_ID_KEY, _defaultMetadata.get(METADATA_PROJECT_ID_KEY));
+            final String dataset = datastream.getMetadata().getOrDefault(METADATA_DATASET_KEY, _defaultMetadata.get(METADATA_DATASET_KEY));
+            if (StringUtils.isBlank(dataset)) {
                 throw new DatastreamValidationException("Metadata dataset is not set in the datastream definition.");
             }
 
             final BigqueryDatastreamDestination datastreamDestination = new BigqueryDatastreamDestination(
-                    datastream.getMetadata().getOrDefault(METADATA_PROJECT_ID_KEY, _defaultMetadata.get(METADATA_PROJECT_ID_KEY)),
-                    datastream.getMetadata().get("dataset"),
+                    projectId,
+                    dataset,
                     destinationName
             );
             datastream.getDestination().setConnectionString(datastreamDestination.toString());

@@ -14,7 +14,6 @@ import org.slf4j.LoggerFactory;
 import com.linkedin.datastream.common.DatastreamRecordMetadata;
 import com.linkedin.datastream.common.Package;
 import com.linkedin.datastream.metrics.DynamicMetricsManager;
-import com.linkedin.datastream.serde.Deserializer;
 import com.linkedin.datastream.server.api.transport.buffered.AbstractBatch;
 import com.linkedin.datastream.server.api.transport.buffered.AbstractBatchBuilder;
 
@@ -34,7 +33,6 @@ public class BatchBuilder extends AbstractBatchBuilder {
      * @param maxInflightCommits maximum allowed batches in the commit backlog.
      * @param committer committer object.
      * @param queueSize queue size of the batch builder.
-     * @param valueDeserializer a Deserializer
      * @param destinationConfigurations a Map of BigqueryDatastreamDestination to BigqueryDatastreamConfiguration
      */
     BatchBuilder(final int maxBatchSize,
@@ -42,16 +40,21 @@ public class BatchBuilder extends AbstractBatchBuilder {
                  final int maxInflightCommits,
                  final BigqueryBatchCommitter committer,
                  final int queueSize,
-                 final Deserializer valueDeserializer,
                  final Map<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> destinationConfigurations) {
         super(queueSize);
-        newBatchSupplier = destination -> new Batch(maxBatchSize,
+        newBatchSupplier = destination -> {
+            final BigqueryDatastreamConfiguration config = destinationConfigurations.get(destination);
+            return new Batch(
+                destination,
+                maxBatchSize,
                 maxBatchAge,
                 maxInflightCommits,
-                valueDeserializer,
+                config.getValueDeserializer(),
                 committer,
-                destinationConfigurations.get(destination).getSchemaEvolver()
-        );
+                config.getSchemaEvolver(),
+                config.getFixedSchema().orElse(null)
+            );
+        };
     }
 
     @Override

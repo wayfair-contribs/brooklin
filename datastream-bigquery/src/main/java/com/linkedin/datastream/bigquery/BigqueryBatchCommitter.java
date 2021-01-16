@@ -103,26 +103,20 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
             final BigqueryDatastreamDestination destination = BigqueryDatastreamDestination.parse(destinationStr);
             final BigqueryDatastreamConfiguration datastreamConfiguration = Optional.ofNullable(_datastreamConfigurations.get(destination))
                     .orElseThrow(() -> new IllegalStateException(String.format("configuration not defined for destination: %s", destination)));
-            final String tableName = sanitizeTableName(datastreamConfiguration.getTableNameTemplate()
-                    .map(template -> String.format(template, destination.getDestinatonName()))
-                    .orElse(destination.getDestinatonName()));
+            final String tableName = sanitizeTableName(destination.getDestinatonName());
             final TableId tableId = TableId.of(destination.getProjectId(), destination.getDatasetId(), tableName);
             final String partition = partitionDateFormatter.format(LocalDate.now(ZoneOffset.UTC));
 
             // Initialize destination the first time it is encountered or if the destination configuration has changed
             _initializedDestinationConfiguration.compute(destination, (d, config) -> {
                 if (config != datastreamConfiguration) {
-                    if (datastreamConfiguration.isManageDestinationTable()) {
-                        try {
-                            createOrUpdateTable(tableId, _destTableSchemas.get(destination),
-                                    datastreamConfiguration.getSchemaEvolver(), datastreamConfiguration.getPartitionExpirationDays().orElse(null),
-                                    datastreamConfiguration.getLabels());
-                            log.info("Initialized table {} for destination {}", tableId, destination);
-                        } catch (final Exception e) {
-                            log.warn("Unexpected error initializing table {} for destination {}", tableId, destination, e);
-                        }
-                    } else {
-                        log.info("Initialized table {} for destination {} that is not managed by the datastream", tableId, destination);
+                    try {
+                        createOrUpdateTable(tableId, _destTableSchemas.get(destination),
+                                datastreamConfiguration.getSchemaEvolver(), datastreamConfiguration.getPartitionExpirationDays().orElse(null),
+                                datastreamConfiguration.getLabels(), datastreamConfiguration.isCreateDestinationTableEnabled());
+                        log.info("Initialized table {} for destination {}", tableId, destination);
+                    } catch (final Exception e) {
+                        log.warn("Unexpected error initializing table {} for destination {}", tableId, destination, e);
                     }
                 }
                 return datastreamConfiguration;
@@ -139,11 +133,11 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
                     .createOrUpdateHistogram(this.getClass().getSimpleName(), recordMetadata.get(0).getTopic(), "insertAllExecTime", end - start);
 
             // If we manage the destination table and encountered insert errors, try creating/updating the destination table before retrying
-            if (datastreamConfiguration.isManageDestinationTable() && !insertErrors.isEmpty()) {
+            if (!insertErrors.isEmpty()) {
                 try {
                     final boolean tableUpdatedOrCreated = createOrUpdateTable(tableId, _destTableSchemas.get(destination),
                             datastreamConfiguration.getSchemaEvolver(), datastreamConfiguration.getPartitionExpirationDays().orElse(null),
-                            datastreamConfiguration.getLabels());
+                            datastreamConfiguration.getLabels(), datastreamConfiguration.isCreateDestinationTableEnabled());
                     if (tableUpdatedOrCreated) {
                         log.info("Table created/updated for destination {}. Retrying batch...", destination);
                         insertErrors = insertRowsAndMapErrorsWithRetry(insertTableId, batch);
@@ -249,7 +243,8 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
 
     private boolean createOrUpdateTable(final TableId tableId, final Schema desiredTableSchema,
                                         final BigquerySchemaEvolver schemaEvolver, final Long partitionExpirationDays,
-                                        final List<BigqueryLabel> labels) {
+                                        final List<BigqueryLabel> labels,
+                                        final boolean createDestinationTableEnabled) {
         final TimePartitioning timePartitioning = Optional.ofNullable(partitionExpirationDays)
                 .filter(partitionRetentionDays -> partitionRetentionDays > 0)
                 .map(partitionRetentionDays -> TimePartitioning.of(TimePartitioning.Type.DAY, Duration.of(partitionRetentionDays, ChronoUnit.DAYS).toMillis()))
@@ -257,7 +252,15 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
 
         final Optional<Table> optionalExistingTable = Optional.ofNullable(_bigquery.getTable(tableId));
         return optionalExistingTable.map(table -> updateTable(tableId, desiredTableSchema, timePartitioning, table, schemaEvolver, labels))
-                .orElseGet(() -> createTable(tableId, desiredTableSchema, timePartitioning, labels));
+                .orElseGet(() -> {
+                    final boolean tableCreated;
+                    if (createDestinationTableEnabled) {
+                        tableCreated = createTable(tableId, desiredTableSchema, timePartitioning, labels);
+                    } else {
+                        tableCreated = false;
+                    }
+                    return tableCreated;
+                });
     }
 
     private boolean updateTable(final TableId tableId, final Schema desiredTableSchema,

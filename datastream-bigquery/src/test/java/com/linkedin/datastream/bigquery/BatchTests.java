@@ -9,7 +9,6 @@ import com.codahale.metrics.MetricRegistry;
 import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolver;
 import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolverFactory;
 import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolverType;
-import com.linkedin.datastream.bigquery.schema.SimpleBigquerySchemaEvolver;
 import com.linkedin.datastream.bigquery.translator.SchemaTranslator;
 import com.linkedin.datastream.common.Package;
 import com.linkedin.datastream.common.Record;
@@ -43,16 +42,15 @@ public class BatchTests {
     private KafkaAvroSerializer serializer;
     private BigqueryBatchCommitter committer;
     private BigquerySchemaEvolver schemaEvolver;
-    private Batch batch;
+    private Deserializer deserializer;
 
     @BeforeMethod
     void beforeTest() {
         schemaRegistryClient = new MockSchemaRegistryClient();
-        final Deserializer deserializer = new KafkaDeserializer(new KafkaAvroDeserializer(schemaRegistryClient));
+        deserializer = new KafkaDeserializer(new KafkaAvroDeserializer(schemaRegistryClient));
         serializer = new KafkaAvroSerializer(schemaRegistryClient);
         committer = mock(BigqueryBatchCommitter.class);
-        schemaEvolver = BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.simple);
-        batch = new Batch(10, 10000, 1, deserializer, committer, schemaEvolver);
+        schemaEvolver = BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.dynamic);
     }
 
     @Test
@@ -73,6 +71,8 @@ public class BatchTests {
         final String datasetName = "dataset_name";
         final String tableName = "table_name";
         final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination(projectId, datasetName, tableName);
+
+        final Batch batch = new Batch(destination, 10, 10000, 1, deserializer, committer, schemaEvolver, null);
 
         final Package aPackage = new Package.PackageBuilder()
                 .setTopic(topicName)
@@ -95,6 +95,8 @@ public class BatchTests {
         final org.apache.avro.Schema avroSchema = SchemaBuilder.builder("com.linkedin")
                 .record("test_message").fields().name("message").type("string").noDefault()
                 .endRecord();
+        final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination("project_name", "dataset_name", "table_name");
+        final Batch batch = new Batch(destination, 10, 10000, 1, deserializer, committer, schemaEvolver, null);
         {
             final GenericRecord record = new GenericRecordBuilder(avroSchema)
                     .set("message", "test")
@@ -103,11 +105,6 @@ public class BatchTests {
             final String topicName = "testTopic";
 
             schemaRegistryClient.register(topicName + "-value", avroSchema);
-
-            final String projectId = "project_name";
-            final String datasetName = "dataset_name";
-            final String tableName = "table_name";
-            final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination(projectId, datasetName, tableName);
 
             final Package aPackage = new Package.PackageBuilder()
                     .setTopic(topicName)
@@ -139,11 +136,6 @@ public class BatchTests {
 
         schemaRegistryClient.register(topicName + "-value", newAvroSchema);
 
-        final String projectId = "project_name";
-        final String datasetName = "dataset_name";
-        final String tableName = "table_name";
-        final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination(projectId, datasetName, tableName);
-
         final Package aPackage = new Package.PackageBuilder()
                 .setTopic(topicName)
                 .setDestination(destination.toString())
@@ -158,6 +150,5 @@ public class BatchTests {
 
         final com.google.cloud.bigquery.Schema bqSchema = schemaEvolver.evolveSchema(SchemaTranslator.translate(avroSchema), SchemaTranslator.translate(newAvroSchema));
         verify(committer).setDestTableSchema(destination, bqSchema);
-
     }
 }

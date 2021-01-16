@@ -16,13 +16,16 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolver;
 import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolverFactory;
 import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolverType;
 import com.linkedin.datastream.common.Datastream;
 import com.linkedin.datastream.common.DatastreamDestination;
-import com.linkedin.datastream.serde.Deserializer;
+import com.linkedin.datastream.common.DatastreamSource;
+import com.linkedin.datastream.common.DatastreamUtils;
 import com.linkedin.datastream.server.DatastreamTask;
 import com.linkedin.datastream.server.Pair;
 import com.linkedin.datastream.server.api.connector.DatastreamValidationException;
@@ -40,47 +43,54 @@ import com.linkedin.datastream.server.api.transport.TransportProviderAdmin;
  */
 public class BigqueryTransportProviderAdmin implements TransportProviderAdmin {
 
-    protected static final String METADATA_PROJECT_ID_KEY = "projectId";
     protected static final String METADATA_DATASET_KEY = "dataset";
-    protected static final String METADATA_TABLE_NAME_TEMPLATE_KEY = "tableNameTemplate";
-    protected static final String METADATA_TABLE_SUFFIX_KEY = "tableNameSuffix";
+    protected static final String METADATA_TABLE_SUFFIX_KEY = "tableSuffix";
     protected static final String METADATA_PARTITION_EXPIRATION_DAYS_KEY = "partitionExpirationDays";
-    protected static final String METADATA_SCHEMA_EVOLVER_KEY = "schemaEvolver";
-    protected static final String METADATA_EXCEPTIONS_TABLE_ENABLED_KEY = "exceptionsTableEnabled";
-    protected static final String METADATA_MANAGE_DESTINATION_TABLE_KEY = "manageDestinationTable";
+    protected static final String METADATA_SCHEMA_EVOLUTION_MODE_KEY = "schemaEvolutionMode";
+    protected static final String METADATA_DEAD_LETTER_TABLE_KEY = "deadLetterTable";
+    protected static final String METADATA_AUTO_CREATE_TABLE_KEY = "autoCreateTables";
     protected static final String METADATA_LABELS_KEY = "labels";
+    protected static final String METADATA_SCHEMA_REGISTRY_LOCATION_KEY = "schemaRegistryLocation";
+    protected static final String METADATA_SCHEMA_ID_KEY = "schemaID";
+
+    private static final int DEFAULT_NUMBER_PARTITIONS = 1;
 
     private final BigqueryBufferedTransportProvider _bufferedTransportProvider;
-    private final Serializer _valueSerializer;
-    private final Deserializer _valueDeserializer;
-    private final Map<String, String> _defaultMetadata;
+    private final String _legacyDefaultProjectId;
+    private final String _legacyDefaultSchemaRegistryUrl;
 
     private final BigquerySchemaEvolver _defaultSchemaEvolver;
 
     private final BigqueryTransportProviderFactory _bigqueryTransportProviderFactory;
+    private final BigqueryDatastreamConfigurationFactory _bigqueryDatastreamConfigurationFactory;
 
     private final Map<String, BigquerySchemaEvolver> _bigquerySchemaEvolverMap;
     private final Map<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> _datastreamConfigByDestination;
     private final Map<Datastream, BigqueryTransportProvider> _datastreamTransportProvider;
     private final Map<BigqueryTransportProvider, Set<DatastreamTask>> _transportProviderTasks;
 
+    private final Logger logger = LoggerFactory.getLogger(BigqueryTransportProviderAdmin.class);
+
     /**
      * Constructor.
      */
-    public BigqueryTransportProviderAdmin(final BigqueryBufferedTransportProvider bufferedTransportProvider, final Serializer valueSerializer,
-                                          final Deserializer valueDeserializer,
-                                          final Map<String, String> defaultMetadata, final BigquerySchemaEvolver defaultSchemaEvolver,
+    public BigqueryTransportProviderAdmin(final BigqueryBufferedTransportProvider bufferedTransportProvider,
+                                          final BigquerySchemaEvolver defaultSchemaEvolver,
                                           final Map<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> datastreamConfigByDestination,
                                           final Map<String, BigquerySchemaEvolver> bigquerySchemaEvolverMap,
-                                          final BigqueryTransportProviderFactory bigqueryTransportProviderFactory) {
+                                          final BigqueryTransportProviderFactory bigqueryTransportProviderFactory,
+                                          final BigqueryDatastreamConfigurationFactory bigqueryDatastreamConfigurationFactory,
+                                          final String legacyDefaultProjectId,
+                                          final String legacyDefaultSchemaRegistryUrl) {
         this._bufferedTransportProvider = bufferedTransportProvider;
-        this._valueSerializer = valueSerializer;
-        this._valueDeserializer = valueDeserializer;
-        this._defaultMetadata = defaultMetadata;
         this._defaultSchemaEvolver = defaultSchemaEvolver;
         this._datastreamConfigByDestination = datastreamConfigByDestination;
         this._bigquerySchemaEvolverMap = bigquerySchemaEvolverMap;
         this._bigqueryTransportProviderFactory = bigqueryTransportProviderFactory;
+        this._bigqueryDatastreamConfigurationFactory = bigqueryDatastreamConfigurationFactory;
+
+        this._legacyDefaultProjectId = legacyDefaultProjectId;
+        this._legacyDefaultSchemaRegistryUrl = legacyDefaultSchemaRegistryUrl;
 
         _datastreamTransportProvider = new ConcurrentHashMap<>();
         _transportProviderTasks = new ConcurrentHashMap<>();
@@ -94,7 +104,7 @@ public class BigqueryTransportProviderAdmin implements TransportProviderAdmin {
         return _datastreamTransportProvider.computeIfAbsent(datastream, d -> {
             final BigqueryDatastreamConfiguration configuration = getConfigurationFromDatastream(d);
             final BigqueryTransportProvider transportProvider =  _bigqueryTransportProviderFactory.createTransportProvider(_bufferedTransportProvider,
-                    _valueSerializer, _valueDeserializer, configuration, _datastreamConfigByDestination);
+                    configuration.getValueSerializer(), configuration.getValueDeserializer(), configuration, _datastreamConfigByDestination);
             _transportProviderTasks.computeIfAbsent(transportProvider, tp -> ConcurrentHashMap.newKeySet()).add(task);
             return transportProvider;
         });
@@ -131,25 +141,38 @@ public class BigqueryTransportProviderAdmin implements TransportProviderAdmin {
             datastream.setDestination(new DatastreamDestination());
         }
 
-        if (datastream.getDestination().hasConnectionString()) {
+        final DatastreamSource source = datastream.getSource();
+        final DatastreamDestination destination = datastream.getDestination();
+
+        // Skip the destination partition validation for datastreams that have connector-managed destinations
+        // (i.e. mirroring connectors)
+        if (!DatastreamUtils.isConnectorManagedDestination(datastream) && (!destination.hasPartitions() || destination.getPartitions() <= 0)) {
+            if (source.hasPartitions()) {
+                destination.setPartitions(source.getPartitions());
+            } else {
+                logger.warn("Unable to set the number of partitions in a destination, set to default {}", DEFAULT_NUMBER_PARTITIONS);
+                destination.setPartitions(DEFAULT_NUMBER_PARTITIONS);
+            }
+        }
+
+        if (destination.hasConnectionString()) {
             try {
-                BigqueryDatastreamDestination.parse(datastream.getDestination().getConnectionString());
+                BigqueryDatastreamDestination.parse(destination.getConnectionString());
             } catch (IllegalArgumentException e) {
                 throw new DatastreamValidationException("Bigquery datastream destination is malformed", e);
             }
         } else {
-            final String projectId = datastream.getMetadata().getOrDefault(METADATA_PROJECT_ID_KEY, _defaultMetadata.get(METADATA_PROJECT_ID_KEY));
-            final String dataset = datastream.getMetadata().getOrDefault(METADATA_DATASET_KEY, _defaultMetadata.get(METADATA_DATASET_KEY));
+            final String dataset = datastream.getMetadata().get(METADATA_DATASET_KEY);
             if (StringUtils.isBlank(dataset)) {
                 throw new DatastreamValidationException("Metadata dataset is not set in the datastream definition.");
             }
 
             final BigqueryDatastreamDestination datastreamDestination = new BigqueryDatastreamDestination(
-                    projectId,
+                    _legacyDefaultProjectId,
                     dataset,
-                    destinationName
+                    destinationName + datastream.getMetadata().getOrDefault(METADATA_TABLE_SUFFIX_KEY, "")
             );
-            datastream.getDestination().setConnectionString(datastreamDestination.toString());
+            destination.setConnectionString(datastreamDestination.toString());
         }
     }
 
@@ -166,39 +189,60 @@ public class BigqueryTransportProviderAdmin implements TransportProviderAdmin {
         return Duration.ofSeconds(0);
     }
 
-    BigqueryDatastreamConfiguration getConfigurationFromDatastreamTask(final DatastreamTask task) {
-        // Assume that the task has a single datastream
-        final Datastream datastream = task.getDatastreams().get(0);
-        return getConfigurationFromDatastream(datastream);
-    }
-
     BigqueryDatastreamConfiguration getConfigurationFromDatastream(final Datastream datastream) {
         final Map<String, String> metadata = datastream.getMetadata();
-        return new BigqueryDatastreamConfiguration(
-                Optional.ofNullable(metadata.get(METADATA_SCHEMA_EVOLVER_KEY)).map(
-                        name -> Optional.ofNullable(_bigquerySchemaEvolverMap.get(name))
-                                .orElseThrow(() -> new IllegalStateException(String.format("schema evolver not found with name: %s", name))
-                                )).orElse(_defaultSchemaEvolver),
-                Optional.ofNullable(metadata.getOrDefault(METADATA_MANAGE_DESTINATION_TABLE_KEY, _defaultMetadata.get(METADATA_MANAGE_DESTINATION_TABLE_KEY)))
-                        .map(Boolean::valueOf).orElse(true),
-                Optional.ofNullable(metadata.getOrDefault(METADATA_PARTITION_EXPIRATION_DAYS_KEY, _defaultMetadata.get(METADATA_PARTITION_EXPIRATION_DAYS_KEY)))
-                        .map(Long::valueOf).orElse(null),
-                Optional.ofNullable(metadata.get(METADATA_TABLE_NAME_TEMPLATE_KEY))
-                        .orElse(Optional.ofNullable(metadata.get(METADATA_TABLE_SUFFIX_KEY))
-                                .map(suffix -> "%s" + suffix).orElse(null)),
-                Optional.ofNullable(metadata.getOrDefault(METADATA_EXCEPTIONS_TABLE_ENABLED_KEY,
-                        _defaultMetadata.get(METADATA_EXCEPTIONS_TABLE_ENABLED_KEY))).filter(Boolean::parseBoolean)
-                        .map(enabled -> new BigqueryDatastreamConfiguration(
-                                BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.simple), true
-                                )).orElse(null),
-                Optional.ofNullable(metadata.getOrDefault(METADATA_LABELS_KEY, _defaultMetadata.get(METADATA_LABELS_KEY)))
-                        .map(this::parseLabelsString).orElse(null)
+        final String schemaRegistryLocation = metadata.getOrDefault(METADATA_SCHEMA_REGISTRY_LOCATION_KEY, _legacyDefaultSchemaRegistryUrl);
+        final BigquerySchemaEvolver schemaEvolver = Optional.ofNullable(metadata.get(METADATA_SCHEMA_EVOLUTION_MODE_KEY)).map(
+                name -> Optional.ofNullable(_bigquerySchemaEvolverMap.get(name))
+                        .orElseThrow(() -> new IllegalStateException(String.format("schema evolver not found with name: %s", name))
+                        )).orElse(_defaultSchemaEvolver);
+        final boolean autoCreateDestinationTable = Optional.ofNullable(metadata.get(METADATA_AUTO_CREATE_TABLE_KEY))
+                .map(Boolean::valueOf).orElse(true);
+        final Long partitionExpirationDays = Optional.ofNullable(metadata.get(METADATA_PARTITION_EXPIRATION_DAYS_KEY))
+                .map(Long::valueOf).orElse(null);
+
+        final BigqueryDatastreamDestination destination;
+        if (datastream.getDestination() != null && datastream.getDestination().hasConnectionString()) {
+            destination = BigqueryDatastreamDestination.parse(datastream.getDestination().getConnectionString());
+        } else {
+            final String dataset = metadata.get(METADATA_DATASET_KEY);
+            destination = new BigqueryDatastreamDestination(_legacyDefaultProjectId, dataset, "*");
+        }
+        final BigqueryDatastreamDestination deadLetterTable = BigqueryDatastreamDestination
+                .parse(metadata.getOrDefault(METADATA_DEAD_LETTER_TABLE_KEY, destination.toString() + "_exceptions"));
+        final BigqueryDatastreamConfiguration deadLetterTableConfiguration = _bigqueryDatastreamConfigurationFactory.createBigqueryDatastreamConfiguration(
+                deadLetterTable,
+                datastream.getName(),
+                schemaRegistryLocation,
+                BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.dynamic),
+                true,
+                null,
+                null,
+                null,
+                null
         );
+        final List<BigqueryLabel> labels = Optional.ofNullable(metadata.get(METADATA_LABELS_KEY))
+                .map(this::parseLabelsString).orElse(null);
+        final Integer schemaId = Optional.ofNullable(metadata.get(METADATA_SCHEMA_ID_KEY)).map(Integer::valueOf).orElse(null);
+
+        return _bigqueryDatastreamConfigurationFactory.createBigqueryDatastreamConfiguration(
+                destination,
+                datastream.getName(),
+                schemaRegistryLocation,
+                schemaEvolver,
+                autoCreateDestinationTable,
+                partitionExpirationDays,
+                deadLetterTableConfiguration,
+                labels,
+                schemaId
+                );
     }
 
-    private List<BigqueryLabel> parseLabelsString(final String labelsString) {
+    protected List<BigqueryLabel> parseLabelsString(final String labelsString) {
         // Parse to map first to find overlapping label names
-        final Map<String, String> labelsMap = Arrays.stream(labelsString.split(",")).map(label -> {
+        final Map<String, String> labelsMap = Arrays.stream(labelsString.split(","))
+                .filter(StringUtils::isNotBlank)
+                .map(label -> {
             final String[] parts = label.split(":");
             if (parts.length == 0 || parts.length > 2) {
                 throw new IllegalArgumentException("invalid label: " + label);

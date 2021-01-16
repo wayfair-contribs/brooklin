@@ -16,8 +16,8 @@ import com.linkedin.datastream.common.VerifiableProperties;
  */
 public class BigquerySchemaEvolverFactory {
 
-    private static final BigquerySchemaEvolver SIMPLE_SCHEMA_EVOLVER = new SimpleBigquerySchemaEvolver();
-    private static final BigquerySchemaEvolver NOOP_SCHEMA_EVOLVER = new NoOpBigquerySchemaEvolver();
+    private static final BigquerySchemaEvolver SIMPLE_SCHEMA_EVOLVER = new DynamicBigquerySchemaEvolver();
+    private static final BigquerySchemaEvolver NOOP_SCHEMA_EVOLVER = new FixedBigquerySchemaEvolver();
 
     /**
      * A factory method that constructs a BigquerySchemaEvolver instance from properties.
@@ -25,7 +25,7 @@ public class BigquerySchemaEvolverFactory {
      * @return an instance of BigquerySchemaEvolver
      */
     public static BigquerySchemaEvolver createBigquerySchemaEvolver(final VerifiableProperties properties) {
-        final String schemaEvolverTypeStr = properties.getString("type", BigquerySchemaEvolverType.noop.name());
+        final String schemaEvolverTypeStr = properties.getString("type", BigquerySchemaEvolverType.fixed.name());
         return createBigquerySchemaEvolver(BigquerySchemaEvolverType.valueOf(schemaEvolverTypeStr));
     }
 
@@ -37,10 +37,10 @@ public class BigquerySchemaEvolverFactory {
     public static BigquerySchemaEvolver createBigquerySchemaEvolver(final BigquerySchemaEvolverType schemaEvolverType) {
         final BigquerySchemaEvolver schemaEvolver;
         switch (schemaEvolverType) {
-            case simple:
+            case dynamic:
                 schemaEvolver = SIMPLE_SCHEMA_EVOLVER;
                 break;
-            case noop:
+            case fixed:
                 schemaEvolver = NOOP_SCHEMA_EVOLVER;
                 break;
             default:

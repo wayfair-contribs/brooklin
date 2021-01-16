@@ -39,9 +39,10 @@ public class Batch extends AbstractBatch {
 
     private org.apache.avro.Schema _avroSchema;
     private Schema _schema;
-    private String _destination;
+    private final BigqueryDatastreamDestination _destination;
     private final Deserializer _valueDeserializer;
     private final BigquerySchemaEvolver _schemaEvolver;
+    private final org.apache.avro.Schema _fixedAvroSchema;
 
     /**
      * Constructor for Batch.
@@ -51,27 +52,31 @@ public class Batch extends AbstractBatch {
      * @param valueDeserializer a Deserializer
      * @param committer committer object
      */
-    public Batch(int maxBatchSize,
-                 int maxBatchAge,
-                 int maxInflightWriteLogCommits,
-                 Deserializer valueDeserializer,
-                 BigqueryBatchCommitter committer,
-                 BigquerySchemaEvolver schemaEvolver) {
+    public Batch(
+            final BigqueryDatastreamDestination destination,
+            final int maxBatchSize,
+            final int maxBatchAge,
+            final int maxInflightWriteLogCommits,
+            final Deserializer valueDeserializer,
+            final BigqueryBatchCommitter committer,
+            final BigquerySchemaEvolver schemaEvolver,
+            final org.apache.avro.Schema fixedAvroSchema
+    ) {
         super(maxInflightWriteLogCommits);
+        this._destination = destination;
         this._maxBatchSize = maxBatchSize;
         this._maxBatchAge = maxBatchAge;
         this._committer = committer;
+        this._valueDeserializer = valueDeserializer;
+        this._schemaEvolver = schemaEvolver;
+        this._fixedAvroSchema = fixedAvroSchema;
         this._batch = new ArrayList<>();
         this._batchCreateTimeStamp = System.currentTimeMillis();
         this._schema = null;
-        this._destination = null;
-        this._valueDeserializer = valueDeserializer;
-        this._schemaEvolver = schemaEvolver;
     }
 
     private void reset() {
         _batch.clear();
-        _destination = null;
         _ackCallbacks.clear();
         _recordMetadata.clear();
         _sourceTimestamps.clear();
@@ -96,10 +101,6 @@ public class Batch extends AbstractBatch {
                 return;
             }
 
-            if (_destination == null) {
-                _destination = aPackage.getDestination();
-            }
-
             final GenericRecord record;
             try {
                 record = (GenericRecord) _valueDeserializer.deserialize((byte[]) aPackage.getRecord().getValue());
@@ -120,7 +121,11 @@ public class Batch extends AbstractBatch {
                 throw e;
             }
 
-            processAvroSchema(record.getSchema());
+            if (_fixedAvroSchema == null) {
+                processAvroSchema(record.getSchema());
+            } else {
+                processAvroSchema(_fixedAvroSchema);
+            }
 
             _batch.add(RecordTranslator.translate(record));
 
@@ -149,7 +154,7 @@ public class Batch extends AbstractBatch {
         newBQSchema.ifPresent(schema -> {
             _avroSchema = avroSchema;
             _schema = schema;
-            _committer.setDestTableSchema(BigqueryDatastreamDestination.parse(_destination), _schema);
+            _committer.setDestTableSchema(_destination, _schema);
         });
     }
 
@@ -161,11 +166,11 @@ public class Batch extends AbstractBatch {
             incrementInflightWriteLogCommits();
             _committer.commit(
                     new ArrayList<>(_batch),
-                    _destination,
+                    _destination.toString(),
                     new ArrayList<>(_ackCallbacks),
                     new ArrayList<>(_recordMetadata),
                     new ArrayList<>(_sourceTimestamps),
-                    () -> decrementInflightWriteLogCommitsAndNotify()
+                    this::decrementInflightWriteLogCommitsAndNotify
             );
             reset();
             if (force) {

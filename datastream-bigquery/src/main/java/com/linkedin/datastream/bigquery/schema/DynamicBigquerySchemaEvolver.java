@@ -21,11 +21,11 @@ import com.google.common.collect.ImmutableList;
 
 
 /**
- * A simple/basic implementation of a BigQuerySchemaEvolver.
+ * A dynamic implementation of a BigQuerySchemaEvolver.
  */
-public class SimpleBigquerySchemaEvolver implements BigquerySchemaEvolver {
+public class DynamicBigquerySchemaEvolver implements BigquerySchemaEvolver {
 
-    protected SimpleBigquerySchemaEvolver() { }
+    protected DynamicBigquerySchemaEvolver() { }
 
     @Override
     public Schema evolveSchema(final Schema baseSchema, final Schema newSchema) throws IncompatibleSchemaEvolutionException {

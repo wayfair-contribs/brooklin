@@ -98,8 +98,8 @@ public class BigqueryTransportProvider implements TransportProvider {
     public void send(final String destination, final DatastreamProducerRecord record, final SendCallback onComplete) {
         final BigqueryDatastreamDestination datastreamDestination = BigqueryDatastreamDestination.parse(destination);
         registerConfigurationForDestination(datastreamDestination, _datastreamConfiguration);
-        final SendCallback callbackHandler = _datastreamConfiguration.getExceptionsTableConfiguration()
-                .map(ec -> exceptionHandlingCallbackHandler(datastreamDestination, record, onComplete, ec))
+        final SendCallback callbackHandler = _datastreamConfiguration.getDeadLetterTableConfiguration()
+                .map(deadLetterTableConfiguration -> exceptionHandlingCallbackHandler(datastreamDestination, record, onComplete, deadLetterTableConfiguration))
                 .orElse(onComplete);
         _bufferedTransportProvider.send(destination, record, callbackHandler);
     }
@@ -120,14 +120,17 @@ public class BigqueryTransportProvider implements TransportProvider {
                     onComplete.onCompletion(metadata, e);
                     return;
                 }
-                final BigqueryDatastreamDestination exceptionDestination = new BigqueryDatastreamDestination(
-                        datastreamDestination.getProjectId(),
-                        datastreamDestination.getDatasetId(),
-                        getExceptionsDestinationName(datastreamDestination.getDestinatonName())
-                );
-                registerConfigurationForDestination(exceptionDestination, config);
+
+                final BigqueryDatastreamDestination deadLetterTableDestination;
+                if (config.getDestination().isWildcardDestination()) {
+                    deadLetterTableDestination = config.getDestination().replaceWildcard(datastreamDestination.getDestinatonName());
+                } else {
+                    deadLetterTableDestination = config.getDestination();
+                }
+
+                registerConfigurationForDestination(deadLetterTableDestination, config);
                 // Send an exception record
-                _bufferedTransportProvider.send(exceptionDestination.toString(), exceptionRecord,
+                _bufferedTransportProvider.send(deadLetterTableDestination.toString(), exceptionRecord,
                         (exceptionRecordMetadata, exceptionRecordException) ->
                             onComplete.onCompletion(metadata,
                                     // Call the callback with the original exception if an exception is encountered
@@ -160,10 +163,6 @@ public class BigqueryTransportProvider implements TransportProvider {
     @Override
     public void flush() {
         _bufferedTransportProvider.flush();
-    }
-
-    private static String getExceptionsDestinationName(final String destinationName) {
-        return destinationName + "_exceptions";
     }
 
     private static String getExceptionsTopicName(final String topicName) {

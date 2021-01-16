@@ -17,13 +17,13 @@ import java.util.Optional;
 import static org.testng.Assert.assertEquals;
 
 @Test
-public class SimpleBigquerySchemaEvolverTests {
+public class DynamicBigquerySchemaEvolverTests {
 
-    private static SimpleBigquerySchemaEvolver schemaEvolver = null;
+    private static DynamicBigquerySchemaEvolver schemaEvolver = null;
 
     @BeforeClass
     public void beforeTests() {
-        schemaEvolver = new SimpleBigquerySchemaEvolver();
+        schemaEvolver = new DynamicBigquerySchemaEvolver();
     }
 
 

@@ -1,7 +1,7 @@
 /**
- *  Copyright 2020 Wayfair LLC. All rights reserved.
- *  Licensed under the BSD 2-Clause License. See the LICENSE file in the project root for license information.
- *  See the NOTICE file in the project root for additional information regarding copyright ownership.
+ * Copyright 2020 Wayfair LLC. All rights reserved.
+ * Licensed under the BSD 2-Clause License. See the LICENSE file in the project root for license information.
+ * See the NOTICE file in the project root for additional information regarding copyright ownership.
  */
 package com.linkedin.datastream.bigquery;
 
@@ -35,10 +35,12 @@ import com.linkedin.datastream.serde.Deserializer;
 import com.linkedin.datastream.server.DatastreamProducerRecord;
 import com.linkedin.datastream.server.DatastreamProducerRecordBuilder;
 import com.linkedin.datastream.server.Pair;
+
 import io.confluent.kafka.schemaregistry.client.MockSchemaRegistryClient;
 import io.confluent.kafka.serializers.KafkaAvroDeserializer;
 import io.confluent.kafka.serializers.KafkaAvroSerializer;
 import io.confluent.kafka.serializers.KafkaAvroSerializerConfig;
+
 import org.apache.avro.Schema;
 import org.apache.avro.SchemaBuilder;
 import org.apache.avro.generic.GenericRecord;
@@ -118,12 +120,14 @@ public class BigqueryTransportProviderTests {
         final String tableName = BigqueryBatchCommitter.sanitizeTableName(topicName);
         final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination(projectId, datasetName, tableName);
         final Map<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> destConfigs = new HashMap<>();
-        final BigqueryDatastreamConfiguration config = new BigqueryDatastreamConfiguration(BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.simple), true);
+        final BigqueryDatastreamConfiguration config = BigqueryDatastreamConfiguration.builder(
+                destination, BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.dynamic), true,
+                valueDeserializer, valueSerializer).build();
         destConfigs.put(destination, config);
 
         final BigqueryBatchCommitter committer = new BigqueryBatchCommitter(bigQuery, 1, destConfigs);
         final BatchBuilder batchBuilder = new BatchBuilder(
-                maxBatchSize, maxBatchAge, maxInflightCommits, committer, queueSize, valueDeserializer, destConfigs
+                maxBatchSize, maxBatchAge, maxInflightCommits, committer, queueSize, destConfigs
         );
         final List<BatchBuilder> batchBuilders = ImmutableList.of(batchBuilder);
 
@@ -211,13 +215,15 @@ public class BigqueryTransportProviderTests {
         final String topicName = getUniqueTopicName();
         final String tableName = BigqueryBatchCommitter.sanitizeTableName(topicName);
         final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination(projectId, datasetName, tableName);
-        final BigqueryDatastreamConfiguration config = new BigqueryDatastreamConfiguration(BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.simple), true);
+        final BigqueryDatastreamConfiguration config = BigqueryDatastreamConfiguration.builder(
+                destination, BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.dynamic), true,
+                valueDeserializer, valueSerializer).build();
         final Map<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> destConfigs = new HashMap<>();
-        destConfigs.put(destination, new BigqueryDatastreamConfiguration(BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.simple), true));
+        destConfigs.put(destination, config);
 
         final BigqueryBatchCommitter committer = new BigqueryBatchCommitter(bigQuery, 1, destConfigs);
         final BatchBuilder batchBuilder = new BatchBuilder(
-                maxBatchSize, maxBatchAge, maxInflightCommits, committer, queueSize, valueDeserializer, destConfigs
+                maxBatchSize, maxBatchAge, maxInflightCommits, committer, queueSize, destConfigs
         );
         final List<BatchBuilder> batchBuilders = ImmutableList.of(batchBuilder);
         final TableId tableId = TableId.of(projectId, datasetName, topicName);
@@ -314,12 +320,14 @@ public class BigqueryTransportProviderTests {
         final String tableName = BigqueryBatchCommitter.sanitizeTableName(topicName);
         final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination(projectId, datasetName, tableName);
         final Map<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> destConfigs = new HashMap<>();
-        final BigqueryDatastreamConfiguration config = new BigqueryDatastreamConfiguration(BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.simple), true);
+        final BigqueryDatastreamConfiguration config = BigqueryDatastreamConfiguration.builder(
+                destination, BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.dynamic), true,
+                valueDeserializer, valueSerializer).build();
         destConfigs.put(destination, config);
 
         final BigqueryBatchCommitter committer = new BigqueryBatchCommitter(bigQuery, 1, destConfigs);
         final BatchBuilder batchBuilder = new BatchBuilder(
-                maxBatchSize, maxBatchAge, maxInflightCommits, committer, queueSize, valueDeserializer, destConfigs
+                maxBatchSize, maxBatchAge, maxInflightCommits, committer, queueSize, destConfigs
         );
         final List<BatchBuilder> batchBuilders = ImmutableList.of(batchBuilder);
 
@@ -407,14 +415,23 @@ public class BigqueryTransportProviderTests {
         final String topicName = getUniqueTopicName();
         final String tableName = BigqueryBatchCommitter.sanitizeTableName(topicName);
         final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination(projectId, datasetName, tableName);
+        final TableId exceptionsTableId = TableId.of(projectId, datasetName, topicName + "_exceptions");
+        final BigqueryDatastreamDestination deadLetterTableDestination = new BigqueryDatastreamDestination(projectId, datasetName, exceptionsTableId.getTable());
         final Map<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> destConfigs = new HashMap<>();
-        final BigqueryDatastreamConfiguration config = new BigqueryDatastreamConfiguration(BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.simple), true,
-                null, null, new BigqueryDatastreamConfiguration(BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.simple), true), null);
+        final BigqueryDatastreamConfiguration config = BigqueryDatastreamConfiguration.builder(
+                destination, BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.dynamic), true,
+                valueDeserializer, valueSerializer)
+                .withDeadLetterTableConfiguration(
+                        BigqueryDatastreamConfiguration.builder(
+                                deadLetterTableDestination, BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.dynamic), true,
+                                valueDeserializer, valueSerializer).build())
+                .build();
+
         destConfigs.put(destination, config);
 
         final BigqueryBatchCommitter committer = new BigqueryBatchCommitter(bigQuery, 1, destConfigs);
         final BatchBuilder batchBuilder = new BatchBuilder(
-                maxBatchSize, maxBatchAge, maxInflightCommits, committer, queueSize, valueDeserializer, destConfigs
+                maxBatchSize, maxBatchAge, maxInflightCommits, committer, queueSize, destConfigs
         );
         final List<BatchBuilder> batchBuilders = ImmutableList.of(batchBuilder);
 
@@ -433,7 +450,7 @@ public class BigqueryTransportProviderTests {
         when(mockedTable.getDefinition()).thenReturn(tableDefinition);
         when(bigQuery.getTable(tableId)).thenReturn(mockedTable);
 
-        final TableId exceptionsTableId = TableId.of(projectId, datasetName, topicName + "_exceptions");
+
         final TableId insertExceptionsTableId = TableId.of(tableId.getProject(), tableId.getDataset(),
                 String.format("%s$%s", exceptionsTableId.getTable(), LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"))));
 
@@ -469,7 +486,7 @@ public class BigqueryTransportProviderTests {
                             return optionalError.map(error -> Stream.of(Pair.of(i.longValue(), Collections.singletonList(error)))).orElse(Stream.empty());
                         }).collect(Collectors.toMap(Pair::getKey, Pair::getValue));
 
-            } else if  (request.getTable().equals(insertExceptionsTableId)) {
+            } else if (request.getTable().equals(insertExceptionsTableId)) {
                 request.getRows().forEach(row -> insertedErrors.add(row.getContent()));
                 insertErrors = Collections.emptyMap();
             } else {
@@ -540,14 +557,22 @@ public class BigqueryTransportProviderTests {
         final String topicName = getUniqueTopicName();
         final String tableName = BigqueryBatchCommitter.sanitizeTableName(topicName);
         final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination(projectId, datasetName, tableName);
+        final TableId exceptionsTableId = TableId.of(projectId, datasetName, topicName + "_exceptions");
+        final BigqueryDatastreamDestination deadLetterTableDestination = new BigqueryDatastreamDestination(projectId, datasetName, exceptionsTableId.getTable());
         final Map<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> destConfigs = new HashMap<>();
-        final BigqueryDatastreamConfiguration config = new BigqueryDatastreamConfiguration(BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.simple), true,
-                null, null, new BigqueryDatastreamConfiguration(BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.simple), true), null);
+        final BigqueryDatastreamConfiguration config = BigqueryDatastreamConfiguration.builder(
+                destination, BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.dynamic), true,
+                valueDeserializer, valueSerializer
+        ).withDeadLetterTableConfiguration(
+                BigqueryDatastreamConfiguration.builder(
+                        deadLetterTableDestination, BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.dynamic), true,
+                        valueDeserializer, valueSerializer).build()
+        ).build();
         destConfigs.put(destination, config);
 
         final BigqueryBatchCommitter committer = new BigqueryBatchCommitter(bigQuery, 1, destConfigs);
         final BatchBuilder batchBuilder = new BatchBuilder(
-                maxBatchSize, maxBatchAge, maxInflightCommits, committer, queueSize, valueDeserializer, destConfigs
+                maxBatchSize, maxBatchAge, maxInflightCommits, committer, queueSize, destConfigs
         );
         final List<BatchBuilder> batchBuilders = ImmutableList.of(batchBuilder);
 
@@ -566,7 +591,6 @@ public class BigqueryTransportProviderTests {
         when(mockedTable.getDefinition()).thenReturn(tableDefinition);
         when(bigQuery.getTable(tableId)).thenReturn(mockedTable);
 
-        final TableId exceptionsTableId = TableId.of(projectId, datasetName, topicName + "_exceptions");
         final TableId insertExceptionsTableId = TableId.of(tableId.getProject(), tableId.getDataset(),
                 String.format("%s$%s", exceptionsTableId.getTable(), LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"))));
 
@@ -601,7 +625,7 @@ public class BigqueryTransportProviderTests {
                             return optionalError.map(error -> Stream.of(Pair.of(i.longValue(), Collections.singletonList(error)))).orElse(Stream.empty());
                         }).collect(Collectors.toMap(Pair::getKey, Pair::getValue));
 
-            } else if  (request.getTable().equals(insertExceptionsTableId)) {
+            } else if (request.getTable().equals(insertExceptionsTableId)) {
                 insertErrors = IntStream.range(0, request.getRows().size()).boxed()
                         .collect(Collectors.toMap(Integer::longValue, i ->
                                 Collections.singletonList(new BigQueryError("error", null, "Unexpected error"))));
@@ -678,11 +702,11 @@ public class BigqueryTransportProviderTests {
                             final SendCallback onComplete) {
         final CountDownLatch latch = new CountDownLatch(records.size());
         records.stream().forEachOrdered(record -> transportProvider.send(destination, record, ((metadata, exception) -> {
-                    if (onComplete != null) {
-                        onComplete.onCompletion(metadata, exception);
-                    }
-                    latch.countDown();
-                })));
+            if (onComplete != null) {
+                onComplete.onCompletion(metadata, exception);
+            }
+            latch.countDown();
+        })));
         try {
             while (!latch.await(500, TimeUnit.MILLISECONDS)) {
                 transportProvider.flush();

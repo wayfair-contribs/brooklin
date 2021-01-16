@@ -124,13 +124,24 @@ public class KafkaMirrorMakerConnector extends AbstractKafkaConnector {
 
     // verify that BYOT is not used
     if (DatastreamUtils.isUserManagedDestination(stream)) {
-      throw new DatastreamValidationException(
-          String.format("BYOT is not allowed for connector %s. Datastream: %s", stream.getConnectorName(), stream));
-    }
-
-    if (!DatastreamUtils.isConnectorManagedDestination(stream)) {
-      stream.getMetadata()
-          .put(DatastreamMetadataConstants.IS_CONNECTOR_MANAGED_DESTINATION_KEY, Boolean.TRUE.toString());
+      // This should always be true, but checking just to be safe...
+      if (stream.hasDestination() && stream.getDestination().hasConnectionString()) {
+        final String destinationConnectionString = stream.getDestination().getConnectionString();
+        final int placeholderIndex = destinationConnectionString.indexOf(MM_TOPIC_PLACEHOLDER);
+        if (placeholderIndex != -1 && placeholderIndex == destinationConnectionString.lastIndexOf(MM_TOPIC_PLACEHOLDER)) {
+          LOG.info("Allowing user managed datastream destination with connector {} for datastream {}", stream.getConnectorName(), stream.getName());
+        } else {
+          LOG.error("User managed datastream destination format is invalid for connector {} and datastream {}", stream.getConnectorName(), stream.getName());
+          throw new DatastreamValidationException(
+                  String.format("Datastream destination format is invalid for connector %s. Datastream: %s", stream.getConnectorName(), stream)
+          );
+        }
+      } else {
+        throw new DatastreamValidationException(
+                String.format("BYOT is not allowed for connector %s. Datastream: %s", stream.getConnectorName(), stream));
+      }
+    } else if (!DatastreamUtils.isConnectorManagedDestination(stream)) {
+      stream.getMetadata().put(DatastreamMetadataConstants.IS_CONNECTOR_MANAGED_DESTINATION_KEY, Boolean.TRUE.toString());
     }
 
     // verify that the source regular expression can be compiled
@@ -311,12 +322,12 @@ public class KafkaMirrorMakerConnector extends AbstractKafkaConnector {
       while (!isInterrupted() && !_shutdown) {
         try {
           List<String> newPartitionInfo = getPartitionsInfo(consumer);
-          LOG.debug("Fetch partition info for {}, oldPartitionInfo: {}, new Partition info: {}"
-              , datastream.getName(), _subscribedPartitions, newPartitionInfo);
+          LOG.debug("Fetch partition info for {}, oldPartitionInfo: {}, new Partition info: {}",
+                  datastream.getName(), _subscribedPartitions, newPartitionInfo);
 
           if (!ListUtils.isEqualList(newPartitionInfo, _subscribedPartitions)) {
-            LOG.info("get updated partition info for {}, oldPartitionInfo: {}, new Partition info: {}"
-                , datastream.getName(), _subscribedPartitions, newPartitionInfo);
+            LOG.info("get updated partition info for {}, oldPartitionInfo: {}, new Partition info: {}",
+                    datastream.getName(), _subscribedPartitions, newPartitionInfo);
 
             _subscribedPartitions = Collections.synchronizedList(newPartitionInfo);
             _initialized = true;

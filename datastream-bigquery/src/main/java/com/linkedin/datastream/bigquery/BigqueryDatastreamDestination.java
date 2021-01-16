@@ -22,9 +22,11 @@ public class BigqueryDatastreamDestination {
     private final String datasetId;
     private final String destinatonName;
     private final URI uri;
+    private final boolean _wildcardDestination;
 
     private static final String SCHEME = "brooklin-bigquery";
     private static final Pattern DESTINATION_PATTERN = Pattern.compile(SCHEME + "://([^.]+)\\.([^.]+)\\.([^.]+)");
+    private static final Pattern WILDCARD_DESTINATION_PATTERN = Pattern.compile("^[^*]*\\*?[^*]*$");
 
     /**
      * Constructor.
@@ -36,10 +38,13 @@ public class BigqueryDatastreamDestination {
         Validate.notBlank(projectId, "projectId cannot be blank");
         Validate.notBlank(datasetId, "datasetId cannot be blank");
         Validate.notBlank(datasetId, "destinationName cannot be blank");
+        Validate.matchesPattern(destinationName, WILDCARD_DESTINATION_PATTERN.pattern(), "wildcard destinationName must contain a single *");
+
         this.projectId = projectId;
         this.datasetId = datasetId;
         this.destinatonName = destinationName;
         uri = toUri(this);
+        _wildcardDestination = WILDCARD_DESTINATION_PATTERN.matcher(destinationName).matches();
     }
 
     /**
@@ -84,6 +89,20 @@ public class BigqueryDatastreamDestination {
 
     public String getDestinatonName() {
         return destinatonName;
+    }
+
+    public boolean isWildcardDestination() {
+        return _wildcardDestination;
+    }
+
+    /**
+     * Create a new BigqueryDatastreamDestination by replacing the wildcard with a value.
+     * @param value the placeholder value
+     * @return the BigqueryDatastreamDestination
+     */
+    public BigqueryDatastreamDestination replaceWildcard(final String value) {
+        Validate.isTrue(_wildcardDestination, "destination must be a wildcard destination");
+        return new BigqueryDatastreamDestination(projectId, datasetId, destinatonName.replace("*", value));
     }
 
     @Override

@@ -1,7 +1,7 @@
 /**
- *  Copyright 2020 Wayfair LLC. All rights reserved.
- *  Licensed under the BSD 2-Clause License. See the LICENSE file in the project root for license information.
- *  See the NOTICE file in the project root for additional information regarding copyright ownership.
+ * Copyright 2020 Wayfair LLC. All rights reserved.
+ * Licensed under the BSD 2-Clause License. See the LICENSE file in the project root for license information.
+ * See the NOTICE file in the project root for additional information regarding copyright ownership.
  */
 package com.linkedin.datastream.bigquery;
 
@@ -47,10 +47,10 @@ import com.google.common.collect.ImmutableMap;
 import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolver;
 import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolverFactory;
 import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolverType;
-import com.linkedin.datastream.bigquery.schema.SimpleBigquerySchemaEvolver;
 import com.linkedin.datastream.common.DatastreamRecordMetadata;
 import com.linkedin.datastream.common.SendCallback;
 import com.linkedin.datastream.metrics.DynamicMetricsManager;
+import com.linkedin.datastream.serde.Deserializer;
 import com.linkedin.datastream.server.api.transport.buffered.CommitCallback;
 
 import static org.mockito.Mockito.any;
@@ -81,7 +81,7 @@ public class BigqueryBatchCommitterTests {
     @BeforeMethod
     void beforeTest() {
         bigQuery = mock(BigQuery.class);
-        schemaEvolver = BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.simple);
+        schemaEvolver = BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.dynamic);
         destinationConfiguraitons = new HashMap<>();
         batchCommitter = new BigqueryBatchCommitter(bigQuery, 1, destinationConfiguraitons);
     }
@@ -91,7 +91,8 @@ public class BigqueryBatchCommitterTests {
         final TableId tableId = TableId.of("project_name", "dataset_name", "table_name");
         final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination(tableId.getProject(), tableId.getDataset(), tableId.getTable());
         final List<BigqueryLabel> labels = Arrays.asList(BigqueryLabel.of("test"), BigqueryLabel.of("name", "value"));
-        destinationConfiguraitons.put(destination, new BigqueryDatastreamConfiguration(schemaEvolver, true, null, null, null, labels));
+        destinationConfiguraitons.put(destination, BigqueryDatastreamConfiguration.builder(destination, schemaEvolver, true, mock(Deserializer.class), mock(Serializer.class))
+                .withLabels(labels).build());
         final Schema schema = Schema.of(
                 Field.of("string", StandardSQLTypeName.STRING),
                 Field.of("int", StandardSQLTypeName.INT64)
@@ -161,7 +162,7 @@ public class BigqueryBatchCommitterTests {
     public void testCreateTableFailure() throws InterruptedException {
         final TableId tableId = TableId.of("project_name", "dataset_name", "table_name");
         final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination(tableId.getProject(), tableId.getDataset(), tableId.getTable());
-        destinationConfiguraitons.put(destination, new BigqueryDatastreamConfiguration(schemaEvolver, true));
+        destinationConfiguraitons.put(destination, BigqueryDatastreamConfiguration.builder(destination, schemaEvolver, true, mock(Deserializer.class), mock(Serializer.class)).build());
         final Schema schema = Schema.of(
                 Field.of("string", StandardSQLTypeName.STRING),
                 Field.of("int", StandardSQLTypeName.INT64)
@@ -208,10 +209,10 @@ public class BigqueryBatchCommitterTests {
 
 
     @Test
-    public void testTableNotCreatedWhenNotManaged() throws InterruptedException {
+    public void testTableNotCreatedWhenAutoCreateIsDisabled() throws InterruptedException {
         final TableId tableId = TableId.of("project_name", "dataset_name", "table_name");
         final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination(tableId.getProject(), tableId.getDataset(), tableId.getTable());
-        destinationConfiguraitons.put(destination, new BigqueryDatastreamConfiguration(schemaEvolver, false));
+        destinationConfiguraitons.put(destination, BigqueryDatastreamConfiguration.builder(destination, schemaEvolver, false, mock(Deserializer.class), mock(Serializer.class)).build());
         final Schema schema = Schema.of(
                 Field.of("string", StandardSQLTypeName.STRING),
                 Field.of("int", StandardSQLTypeName.INT64)
@@ -253,7 +254,7 @@ public class BigqueryBatchCommitterTests {
 
         latch.await(1, TimeUnit.SECONDS);
 
-        verify(bigQuery, never()).getTable(any(TableId.class));
+        verify(bigQuery, atLeastOnce()).getTable(any(TableId.class));
         verify(bigQuery, never()).create(any(TableInfo.class));
         verify(bigQuery, atLeastOnce()).insertAll(insertAllRequest);
         assertEquals(capturedRecordMetadata, metadata);
@@ -269,7 +270,8 @@ public class BigqueryBatchCommitterTests {
         final TableId tableId = TableId.of("project_name", "dataset_name", "table_name");
         final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination(tableId.getProject(), tableId.getDataset(), tableId.getTable());
         final List<BigqueryLabel> labels = Arrays.asList(BigqueryLabel.of("test"), BigqueryLabel.of("name", "value"));
-        destinationConfiguraitons.put(destination, new BigqueryDatastreamConfiguration(schemaEvolver, true, null, null, null, labels));
+        destinationConfiguraitons.put(destination, BigqueryDatastreamConfiguration.builder(destination, schemaEvolver, true, mock(Deserializer.class), mock(Serializer.class))
+                .withLabels(labels).build());
         final Schema newSchema = Schema.of(
                 Field.of("string", StandardSQLTypeName.STRING),
                 Field.of("int", StandardSQLTypeName.INT64),
@@ -355,10 +357,10 @@ public class BigqueryBatchCommitterTests {
     }
 
     @Test
-    public void testSchemaNotEvolvedWhenNotManaged() throws InterruptedException {
+    public void testSchemaEvolvedWhenAutoCreateIsDisabled() throws InterruptedException {
         final TableId tableId = TableId.of("project_name", "dataset_name", "table_name");
         final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination(tableId.getProject(), tableId.getDataset(), tableId.getTable());
-        destinationConfiguraitons.put(destination, new BigqueryDatastreamConfiguration(schemaEvolver, false));
+        destinationConfiguraitons.put(destination, BigqueryDatastreamConfiguration.builder(destination, schemaEvolver, false, mock(Deserializer.class), mock(Serializer.class)).build());
 
         final TableId insertTableId = TableId.of(tableId.getProject(), tableId.getDataset(),
                 String.format("%s$%s", tableId.getTable(), LocalDate.now(ZoneOffset.UTC).format(DateTimeFormatter.ofPattern("yyyyMMdd"))));
@@ -397,7 +399,7 @@ public class BigqueryBatchCommitterTests {
 
         latch.await(1, TimeUnit.SECONDS);
 
-        verify(bigQuery, never()).getTable(tableId);
+        verify(bigQuery, atLeastOnce()).getTable(tableId);
         verify(bigQuery, never()).create(any(TableInfo.class));
         verify(bigQuery, atLeastOnce()).insertAll(any(InsertAllRequest.class));
         assertEquals(capturedRecordMetadata, metadata);
@@ -412,7 +414,7 @@ public class BigqueryBatchCommitterTests {
     public void testEvolveTableSchemaFailure() throws InterruptedException {
         final TableId tableId = TableId.of("project_name", "dataset_name", "table_name");
         final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination(tableId.getProject(), tableId.getDataset(), tableId.getTable());
-        destinationConfiguraitons.put(destination, new BigqueryDatastreamConfiguration(schemaEvolver, true));
+        destinationConfiguraitons.put(destination, BigqueryDatastreamConfiguration.builder(destination, schemaEvolver, true, mock(Deserializer.class), mock(Serializer.class)).build());
         final Schema newSchema = Schema.of(
                 Field.of("string", StandardSQLTypeName.STRING),
                 Field.of("int", StandardSQLTypeName.INT64),
@@ -483,7 +485,7 @@ public class BigqueryBatchCommitterTests {
     public void testEvolveTableSchemaConcurrencyFailure() throws InterruptedException {
         final TableId tableId = TableId.of("project_name", "dataset_name", "table_name");
         final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination(tableId.getProject(), tableId.getDataset(), tableId.getTable());
-        destinationConfiguraitons.put(destination, new BigqueryDatastreamConfiguration(schemaEvolver, true));
+        destinationConfiguraitons.put(destination, BigqueryDatastreamConfiguration.builder(destination, schemaEvolver, true, mock(Deserializer.class), mock(Serializer.class)).build());
         final Schema newSchema = Schema.of(
                 Field.of("string", StandardSQLTypeName.STRING),
                 Field.of("int", StandardSQLTypeName.INT64),

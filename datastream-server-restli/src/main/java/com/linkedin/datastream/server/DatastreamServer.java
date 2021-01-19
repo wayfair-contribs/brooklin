@@ -92,6 +92,7 @@ public class DatastreamServer {
 
   private final String _csvMetricsDir;
   private final Map<String, String> _bootstrapConnectors;
+  private final Properties _properties;
 
   private Coordinator _coordinator;
   private DatastreamStore _datastreamStore;
@@ -128,6 +129,7 @@ public class DatastreamServer {
    *  </ul>
    */
   public DatastreamServer(Properties properties) throws DatastreamException {
+    _properties = properties;
     LOG.info("Start to initialize DatastreamServer. Properties: " + properties);
     LOG.info("Creating coordinator.");
     VerifiableProperties verifiableProperties = new VerifiableProperties(properties);
@@ -232,6 +234,10 @@ public class DatastreamServer {
 
   public ServerComponentHealthAggregator getServerComponentHealthAggregator() {
     return _serverComponentHealthAggregator;
+  }
+
+  public Properties getProperties() {
+    return _properties;
   }
 
   private void initializeSerde(String serdeName, Properties serdeConfig) {

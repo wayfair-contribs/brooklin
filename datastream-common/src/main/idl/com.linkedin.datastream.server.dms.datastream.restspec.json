@@ -93,6 +93,26 @@
           "default" : "false",
           "doc" : "whether or not to resume all datastreams within the given datastream's group"
         } ]
+      } ],
+      "subresources" : [ {
+        "name" : "checkpoint",
+        "namespace" : "com.linkedin.datastream.server.dms",
+        "path" : "/datastream/{datastreamId}/checkpoint",
+        "schema" : "com.linkedin.datastream.diagnostics.ConnectorHealth",
+        "doc" : "The Restli resource of {@link ConnectorHealth}. Used for collecting datastream checkpoint info\n about a {@link Datastream}.\n\ngenerated from: com.linkedin.datastream.server.dms.DatastreamSourceCheckpointResources",
+        "simple" : {
+          "supports" : [ "get", "update" ],
+          "methods" : [ {
+            "method" : "get",
+            "doc" : "Get source checkpoints of the parent datastream for each tasks"
+          }, {
+            "method" : "update",
+            "doc" : "Update source checkpoint on a given datastream"
+          } ],
+          "entity" : {
+            "path" : "/datastream/{datastreamId}/checkpoint"
+          }
+        }
       } ]
     }
   }

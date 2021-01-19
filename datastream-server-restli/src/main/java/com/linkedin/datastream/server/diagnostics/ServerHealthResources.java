@@ -21,6 +21,7 @@ import com.linkedin.datastream.diagnostics.TaskHealthArray;
 import com.linkedin.datastream.server.Coordinator;
 import com.linkedin.datastream.server.DatastreamServer;
 import com.linkedin.datastream.server.DatastreamTask;
+import com.linkedin.datastream.server.dms.DatastreamSourceCheckpointResources;
 import com.linkedin.restli.server.annotations.RestLiSimpleResource;
 import com.linkedin.restli.server.resources.SimpleResourceTemplate;
 
@@ -35,6 +36,7 @@ public class ServerHealthResources extends SimpleResourceTemplate<ServerHealth> 
 
   private final DatastreamServer _server;
   private final Coordinator _coordinator;
+  private final DatastreamSourceCheckpointResources _checkpointResources;
 
   /**
    * Construct an instance of ServerHealthResources
@@ -43,6 +45,7 @@ public class ServerHealthResources extends SimpleResourceTemplate<ServerHealth> 
   public ServerHealthResources(DatastreamServer datastreamServer) {
     _server = datastreamServer;
     _coordinator = datastreamServer.getCoordinator();
+    _checkpointResources = new DatastreamSourceCheckpointResources(datastreamServer);
   }
 
   @Override
@@ -106,7 +109,15 @@ public class ServerHealthResources extends SimpleResourceTemplate<ServerHealth> 
 
       taskHealth.setName(task.getDatastreamTaskName());
       taskHealth.setPartitions(task.getPartitions().toString());
-      taskHealth.setSourceCheckpoint(task.getCheckpoints().toString());
+      if (_checkpointResources.isCustomCheckpointing(connectorType)) {
+        try {
+          taskHealth.setSourceCheckpoint(_checkpointResources.getKafkaCustomCheckpointProvider(task.getDatastreams().get(0)).getSafeCheckpoint().toString());
+        } catch (Exception e) {
+          e.printStackTrace();
+        }
+      } else {
+        taskHealth.setSourceCheckpoint(task.getCheckpoints().toString());
+      }
       allTasksHealth.add(taskHealth);
     });
 

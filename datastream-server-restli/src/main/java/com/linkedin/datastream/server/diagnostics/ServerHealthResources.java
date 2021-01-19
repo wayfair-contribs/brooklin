@@ -21,7 +21,9 @@ import com.linkedin.datastream.diagnostics.TaskHealthArray;
 import com.linkedin.datastream.server.Coordinator;
 import com.linkedin.datastream.server.DatastreamServer;
 import com.linkedin.datastream.server.DatastreamTask;
+import com.linkedin.datastream.server.ErrorLogger;
 import com.linkedin.datastream.server.dms.DatastreamSourceCheckpointResources;
+import com.linkedin.restli.common.HttpStatus;
 import com.linkedin.restli.server.annotations.RestLiSimpleResource;
 import com.linkedin.restli.server.resources.SimpleResourceTemplate;
 
@@ -37,6 +39,7 @@ public class ServerHealthResources extends SimpleResourceTemplate<ServerHealth> 
   private final DatastreamServer _server;
   private final Coordinator _coordinator;
   private final DatastreamSourceCheckpointResources _checkpointResources;
+  private final ErrorLogger _errorLogger;
 
   /**
    * Construct an instance of ServerHealthResources
@@ -46,6 +49,8 @@ public class ServerHealthResources extends SimpleResourceTemplate<ServerHealth> 
     _server = datastreamServer;
     _coordinator = datastreamServer.getCoordinator();
     _checkpointResources = new DatastreamSourceCheckpointResources(datastreamServer);
+    _errorLogger = new ErrorLogger(LOG, _coordinator.getInstanceName());
+
   }
 
   @Override
@@ -113,7 +118,8 @@ public class ServerHealthResources extends SimpleResourceTemplate<ServerHealth> 
         try {
           taskHealth.setSourceCheckpoint(_checkpointResources.getKafkaCustomCheckpointProvider(task.getDatastreams().get(0)).getSafeCheckpoint().toString());
         } catch (Exception e) {
-          e.printStackTrace();
+          _errorLogger.logAndThrowRestLiServiceException(HttpStatus.S_400_BAD_REQUEST,
+                  "Failed to set checkpoints.", e);
         }
       } else {
         taskHealth.setSourceCheckpoint(task.getCheckpoints().toString());

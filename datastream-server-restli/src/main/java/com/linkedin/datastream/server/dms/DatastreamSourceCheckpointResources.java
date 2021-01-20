@@ -114,7 +114,6 @@ public class DatastreamSourceCheckpointResources extends SimpleResourceTemplate<
 
     private ConnectorHealth buildSourceCheckpoint(Datastream datastream) {
         ConnectorHealth sourceCheckpointDetail = new ConnectorHealth();
-//        sourceCheckpointDetail.setDatastreamName(datastream.getName());
         sourceCheckpointDetail.setTasks(buildTaskSourceCheckpoint(datastream));
 
         return sourceCheckpointDetail;

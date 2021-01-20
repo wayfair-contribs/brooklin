@@ -18,9 +18,13 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
 
+import com.wayfair.commons.metrics.influxdb.InfluxdbMetricRegistry;
+import com.wayfair.commons.metrics.influxdb.InfluxdbReporter;
+import metrics_influxdb.UdpInfluxdbProtocol;
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.lang.Validate;
 import org.slf4j.Logger;
@@ -56,27 +60,7 @@ import com.linkedin.datastream.server.dms.DatastreamResources;
 import com.linkedin.datastream.server.dms.DatastreamStore;
 import com.linkedin.datastream.server.dms.ZookeeperBackedDatastreamStore;
 
-import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.CONFIG_CONNECTOR_ASSIGNMENT_STRATEGY_FACTORY;
-import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.CONFIG_CONNECTOR_AUTHORIZER_NAME;
-import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.CONFIG_CONNECTOR_BOOTSTRAP_TYPE;
-import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.CONFIG_CONNECTOR_CUSTOM_CHECKPOINTING;
-import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.CONFIG_CONNECTOR_DEDUPER_FACTORY;
-import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.CONFIG_CONNECTOR_NAMES;
-import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.CONFIG_CONNECTOR_PREFIX;
-import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.CONFIG_CSV_METRICS_DIR;
-import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.CONFIG_DIAG_PATH;
-import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.CONFIG_DIAG_PORT;
-import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.CONFIG_ENABLE_EMBEDDED_JETTY;
-import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.CONFIG_FACTORY_CLASS_NAME;
-import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.CONFIG_HTTP_PORT;
-import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.CONFIG_SERDE_NAMES;
-import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.CONFIG_SERDE_PREFIX;
-import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.CONFIG_TRANSPORT_PROVIDER_NAMES;
-import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.CONFIG_TRANSPORT_PROVIDER_PREFIX;
-import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.DEFAULT_DEDUPER_FACTORY;
-import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.DOMAIN_DEDUPER;
-import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.DOMAIN_DIAG;
-import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.STRATEGY_DOMAIN;
+import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.*;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.MINUTES;
 import static java.util.concurrent.TimeUnit.SECONDS;
@@ -87,7 +71,7 @@ import static java.util.concurrent.TimeUnit.SECONDS;
  */
 public class DatastreamServer {
   private static final Logger LOG = LoggerFactory.getLogger(DatastreamServer.class);
-  private static final MetricRegistry METRIC_REGISTRY = new MetricRegistry();
+  private static final InfluxdbMetricRegistry METRIC_REGISTRY = new InfluxdbMetricRegistry(new MetricRegistry());
   private static final List<BrooklinMetricInfo> METRIC_INFOS = new ArrayList<>();
 
   private final String _csvMetricsDir;
@@ -199,7 +183,7 @@ public class DatastreamServer {
 
     verifiableProperties.verify();
 
-    initializeMetrics();
+    initializeMetrics(verifiableProperties);
 
     _isInitialized = true;
 
@@ -344,12 +328,12 @@ public class DatastreamServer {
     LOG.info("Connector loaded successfully. Type: " + connectorName);
   }
 
-  private void initializeMetrics() {
+  private void initializeMetrics(VerifiableProperties config) {
     METRIC_INFOS.addAll(ThreadTerminationMonitor.getMetricInfos());
     METRIC_INFOS.addAll(_coordinator.getMetricInfos());
     METRIC_INFOS.addAll(DatastreamResources.getMetricInfos());
 
-    _jmxReporter = JmxReporterFactory.createJmxReporter(METRIC_REGISTRY);
+    _jmxReporter = JmxReporterFactory.createJmxReporter(METRIC_REGISTRY.getMetricRegistry());
 
     if (StringUtils.isNotEmpty(_csvMetricsDir)) {
       LOG.info("Starting CsvReporter in " + _csvMetricsDir);
@@ -361,13 +345,28 @@ public class DatastreamServer {
         }
       }
 
-      final CsvReporter reporter = CsvReporter.forRegistry(METRIC_REGISTRY)
+      final CsvReporter reporter = CsvReporter.forRegistry(METRIC_REGISTRY.getMetricRegistry())
           .formatFor(Locale.US)
           .convertRatesTo(SECONDS)
           .convertDurationsTo(MILLISECONDS)
           .build(csvDir);
       reporter.start(1, MINUTES);
     }
+
+    // init metrics and reporter
+    String telegrafHost = config.getString(CONFIG_TELEGRAF_HOST);
+    int telegrafPort = config.getInt(CONFIG_TELEGRAF_PORT);
+    int reportInterval = config.getInt(CONFIG_METRICS_REPORT_INTERVAL_SEC);
+
+    LOG.info("Starting Influxdb Metric Reporter {} {} {}...", telegrafHost, telegrafPort, reportInterval);
+    InfluxdbReporter
+            .forRegistry(METRIC_REGISTRY)
+            .protocol(new UdpInfluxdbProtocol(telegrafHost, telegrafPort))
+            .prefix("brooklin.")
+            .tag("cluster", config.getString(CONFIG_CLUSTER_NAME))
+            .build()
+            .start(reportInterval, TimeUnit.SECONDS);
+    LOG.info("Influxdb Metric Reporter started.");
   }
 
   /**

@@ -35,4 +35,8 @@ public final class DatastreamServerConfigurationConstants {
   public static final String DOMAIN_DIAG = CONFIG_PREFIX + "diag";
   public static final String CONFIG_DIAG_PORT = "port";
   public static final String CONFIG_DIAG_PATH = "path";
+  // Inflexdb Metrics config
+  public static final String CONFIG_TELEGRAF_HOST = CONFIG_PREFIX+"telegrafHost";
+  public static final String CONFIG_TELEGRAF_PORT = CONFIG_PREFIX+"telegrafPort";
+  public static final String CONFIG_METRICS_REPORT_INTERVAL_SEC = CONFIG_PREFIX+"metricsReportIntervalSec";
 }

@@ -430,6 +430,8 @@ abstract public class AbstractKafkaBasedConnectorTask implements Runnable, Consu
       long curPollTime = System.currentTimeMillis();
       _lastPolledTimeMillis = curPollTime;
       records = consumerPoll(pollInterval);
+      _logger.info("consumer {} consuming {} records", _taskName, records.count());
+
       long pollDurationMillis = System.currentTimeMillis() - curPollTime;
       if (pollDurationMillis > pollInterval + POLL_BUFFER_TIME_MILLIS) {
         // record poll time exceeding client poll timeout

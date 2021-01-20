@@ -191,7 +191,11 @@ class KafkaProducerWrapper<K, V> {
     while (retry) {
       try {
         ++numberOfAttempt;
-        maybeGetKafkaProducer(task).ifPresent(p -> p.send(producerRecord, (metadata, exception) -> {
+        Optional<Producer<K, V>> producer = maybeGetKafkaProducer(task);
+        producer.get().flush();
+
+        producer.ifPresent(p -> p.send(producerRecord, (metadata, exception) -> {
+          _log.info("callback for producer.send. Exception is {}", exception);
           if (exception == null) {
             onComplete.onCompletion(metadata, null);
           } else {

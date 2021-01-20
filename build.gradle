@@ -154,6 +154,8 @@ project(':datastream-common') {
     compile "com.intellij:annotations:$intellijAnnotationsVersion"
     compile "com.google.guava:guava:$guavaVersion"
     compile "tech.allegro.schema.json2avro:converter:$json2avroVersion"
+    compile "com.wayfair.commons:commons-metrics:$wayfairMetricsVersion"
+
     testCompile "org.mockito:mockito-core:$mockitoVersion"
   }
 }

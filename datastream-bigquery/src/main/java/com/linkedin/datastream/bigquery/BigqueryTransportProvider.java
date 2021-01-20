@@ -46,7 +46,7 @@ public class BigqueryTransportProvider extends AbstractBufferedTransportProvider
         _scheduler.scheduleAtFixedRate(
                 () -> {
                     for (AbstractBatchBuilder objectBuilder: _batchBuilders) {
-                        LOG.info("Try flush signal sent.");
+                        LOG.trace("Try flush signal sent.");
                         objectBuilder.assign(new com.linkedin.datastream.common.Package.PackageBuilder().buildTryFlushSignalPackage());
                     }
                 },

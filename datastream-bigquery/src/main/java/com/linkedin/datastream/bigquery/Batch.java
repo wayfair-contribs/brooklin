@@ -7,6 +7,7 @@ package com.linkedin.datastream.bigquery;
 
 import java.nio.BufferUnderflowException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import org.apache.avro.generic.GenericRecord;
@@ -23,11 +24,15 @@ import com.linkedin.datastream.common.DatastreamRecordMetadata;
 import com.linkedin.datastream.common.Package;
 import com.linkedin.datastream.metrics.DynamicMetricsManager;
 import com.linkedin.datastream.server.api.transport.buffered.AbstractBatch;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * This class populates a batch of BQ rows to be committed.
  */
 public class Batch extends AbstractBatch {
+
+    private static final Logger LOG = LoggerFactory.getLogger(Batch.class);
 
     private final int _maxBatchSize;
     private final int _maxBatchAge;
@@ -97,6 +102,8 @@ public class Batch extends AbstractBatch {
             if (_destination == null) {
                 String[] datasetRetentionTableSuffix = aPackage.getDestination().split("/");
                 if (datasetRetentionTableSuffix.length == 3) {
+                    // todo
+                    LOG.info("===== destination = {}", Arrays.toString(datasetRetentionTableSuffix));
                     _destination = datasetRetentionTableSuffix[0] +
                             "/" + aPackage.getTopic() + datasetRetentionTableSuffix[2] +
                             "/" + datasetRetentionTableSuffix[1];

@@ -165,7 +165,8 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
                         sanitizeTableName(datasetTable[1]) + "$" + timeFmt.format(
                                 Calendar.getInstance(utcTimeZone).getTimeInMillis()));
 
-                LOG.debug("Committing a batch to dataset {} and table {}", datasetTable[0], sanitizeTableName(datasetTable[1]));
+                // todo
+                LOG.info("Committing a batch to dataset {} and table {}", datasetTable[0], sanitizeTableName(datasetTable[1]));
                 long start = System.currentTimeMillis();
 
                 response = _bigquery.insertAll(

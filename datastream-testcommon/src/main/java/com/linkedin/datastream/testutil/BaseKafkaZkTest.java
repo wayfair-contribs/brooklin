@@ -36,7 +36,8 @@ public abstract class BaseKafkaZkTest {
 
   @BeforeMethod(alwaysRun = true)
   public void beforeMethodSetup() throws Exception {
-    DynamicMetricsManager.createInstance(new MetricRegistry(), getClass().getSimpleName());
+    // todo: seems no one uses this metrics manager.
+  //  DynamicMetricsManager.createInstance(new MetricRegistry(), getClass().getSimpleName());
     Properties kafkaConfig = new Properties();
     // we will disable auto topic creation for tests
     kafkaConfig.setProperty("auto.create.topics.enable", Boolean.FALSE.toString());

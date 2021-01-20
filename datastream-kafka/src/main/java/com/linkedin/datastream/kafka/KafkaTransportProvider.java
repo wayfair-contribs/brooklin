@@ -155,9 +155,6 @@ public class KafkaTransportProvider<K, V> implements TransportProvider {
       Validate.notNull(record, "null event record.");
       Validate.notNull(record.getEvents(), "null datastream events.");
 
-
-      LOG.debug("Sending Datastream event record: {}", record);
-
       for (Object event : record.getEvents()) {
         ProducerRecord<K, V> outgoing = convertToProducerRecord(topicName, record, event);
 

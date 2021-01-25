@@ -107,28 +107,27 @@ public class BigqueryTransportProvider implements TransportProvider {
     private SendCallback exceptionHandlingCallbackHandler(final BigqueryDatastreamDestination datastreamDestination,
                                                           final DatastreamProducerRecord record,
                                                           final SendCallback onComplete,
-                                                          final BigqueryDatastreamConfiguration config) {
+                                                          final BigqueryDatastreamConfiguration deadLetterTableConfiguration) {
         return (metadata, exception) -> {
             if (exception == null || exception instanceof DatastreamTransientException) {
                 onComplete.onCompletion(metadata, exception);
             } else {
+                final BigqueryDatastreamDestination deadLetterTableDestination;
+                if (deadLetterTableConfiguration.getDestination().isWildcardDestination()) {
+                    deadLetterTableDestination = deadLetterTableConfiguration.getDestination().replaceWildcard(datastreamDestination.getDestinatonName());
+                } else {
+                    deadLetterTableDestination = deadLetterTableConfiguration.getDestination();
+                }
+
                 final DatastreamProducerRecord exceptionRecord;
                 try {
-                    exceptionRecord = createExceptionRecord(record, exception);
+                    exceptionRecord = createExceptionRecord(deadLetterTableDestination.getDestinatonName(), record, exception);
                 } catch (final Exception e) {
                     LOG.error("Unable to create BigQuery exception record", e);
                     onComplete.onCompletion(metadata, e);
                     return;
                 }
-
-                final BigqueryDatastreamDestination deadLetterTableDestination;
-                if (config.getDestination().isWildcardDestination()) {
-                    deadLetterTableDestination = config.getDestination().replaceWildcard(datastreamDestination.getDestinatonName());
-                } else {
-                    deadLetterTableDestination = config.getDestination();
-                }
-
-                registerConfigurationForDestination(deadLetterTableDestination, config);
+                registerConfigurationForDestination(deadLetterTableDestination, deadLetterTableConfiguration);
                 // Send an exception record
                 _bufferedTransportProvider.send(deadLetterTableDestination.toString(), exceptionRecord,
                         (exceptionRecordMetadata, exceptionRecordException) ->
@@ -148,10 +147,6 @@ public class BigqueryTransportProvider implements TransportProvider {
         }
     }
 
-    BigqueryDatastreamConfiguration getDatastreamConfiguration() {
-        return _datastreamConfiguration;
-    }
-
     Set<BigqueryDatastreamDestination> getDestinations() {
         return Collections.unmodifiableSet(_destinations);
     }
@@ -165,11 +160,7 @@ public class BigqueryTransportProvider implements TransportProvider {
         _bufferedTransportProvider.flush();
     }
 
-    private static String getExceptionsTopicName(final String topicName) {
-        return topicName + "_exceptions";
-    }
-
-    private DatastreamProducerRecord createExceptionRecord(final DatastreamProducerRecord record, final Exception exception) {
+    private DatastreamProducerRecord createExceptionRecord(final String exceptionsTopicName, final DatastreamProducerRecord record, final Exception exception) {
         final DatastreamProducerRecordBuilder exceptionRecordBuilder = new DatastreamProducerRecordBuilder();
         exceptionRecordBuilder.setSourceCheckpoint(record.getCheckpoint());
         exceptionRecordBuilder.setEventsSourceTimestamp(record.getEventsSourceTimestamp());
@@ -210,10 +201,11 @@ public class BigqueryTransportProvider implements TransportProvider {
             } else {
                 exceptionAvroRecordBuilder.set("eventValueBytes", ByteBuffer.wrap(new byte[0]));
             }
+            // Use a hard-coded topic name to serialize all exception records, so we only have to manage the exception record schema in one place
             final byte[] exceptionRecordBytes = _valueSerializer.serialize("brooklin-bigquery-transport-exceptions", exceptionAvroRecordBuilder.build());
             final Map<String, String> exceptionRecordMetadata = new HashMap<>(5);
             exceptionRecordMetadata.put(KAFKA_ORIGIN_CLUSTER, cluster);
-            exceptionRecordMetadata.put(KAFKA_ORIGIN_TOPIC, getExceptionsTopicName(topic));
+            exceptionRecordMetadata.put(KAFKA_ORIGIN_TOPIC, exceptionsTopicName);
             exceptionRecordMetadata.put(KAFKA_ORIGIN_PARTITION, partition);
             exceptionRecordMetadata.put(KAFKA_ORIGIN_OFFSET, offset);
             exceptionRecordMetadata.put(BrooklinEnvelopeMetadataConstants.EVENT_TIMESTAMP, eventTimestamp);

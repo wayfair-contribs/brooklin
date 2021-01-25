@@ -48,7 +48,7 @@ public class BigqueryDatastreamDestination {
     }
 
     /**
-     * Utility function to parse a destination Stringo into a BigqueryDatastreamDestination
+     * Utility function to parse a destination String into a BigqueryDatastreamDestination
      * @param destination a String
      * @return the BigqueryDatastreamDestination
      */

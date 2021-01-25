@@ -333,7 +333,7 @@ public class BigqueryTransportProviderTests {
 
         final TableId tableId = TableId.of(projectId, datasetName, topicName);
         final TableId insertTableId = TableId.of(tableId.getProject(), tableId.getDataset(),
-                String.format("%s$%s", tableId.getTable(), LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"))));
+                String.format("%s$%s", tableId.getTable(), LocalDate.now(ZoneOffset.UTC).format(DateTimeFormatter.ofPattern("yyyyMMdd"))));
 
         final TableDefinition tableDefinition = StandardTableDefinition.newBuilder()
                 .setSchema(SchemaTranslator.translate(schema))
@@ -437,7 +437,7 @@ public class BigqueryTransportProviderTests {
 
         final TableId tableId = TableId.of(projectId, datasetName, topicName);
         final TableId insertTableId = TableId.of(tableId.getProject(), tableId.getDataset(),
-                String.format("%s$%s", tableId.getTable(), LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"))));
+                String.format("%s$%s", tableId.getTable(), LocalDate.now(ZoneOffset.UTC).format(DateTimeFormatter.ofPattern("yyyyMMdd"))));
 
         final com.google.cloud.bigquery.Schema firstSchema = SchemaTranslator.translate(currentSchema);
         final TableDefinition tableDefinition = StandardTableDefinition.newBuilder()
@@ -452,7 +452,7 @@ public class BigqueryTransportProviderTests {
 
 
         final TableId insertExceptionsTableId = TableId.of(tableId.getProject(), tableId.getDataset(),
-                String.format("%s$%s", exceptionsTableId.getTable(), LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"))));
+                String.format("%s$%s", exceptionsTableId.getTable(), LocalDate.now(ZoneOffset.UTC).format(DateTimeFormatter.ofPattern("yyyyMMdd"))));
 
         final TableDefinition exceptionsTableDefinition = StandardTableDefinition.newBuilder()
                 .setSchema(SchemaTranslator.translate(BigqueryTransportProvider.EXCEPTION_RECORD_SCHEMA))
@@ -578,7 +578,7 @@ public class BigqueryTransportProviderTests {
 
         final TableId tableId = TableId.of(projectId, datasetName, topicName);
         final TableId insertTableId = TableId.of(tableId.getProject(), tableId.getDataset(),
-                String.format("%s$%s", tableId.getTable(), LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"))));
+                String.format("%s$%s", tableId.getTable(), LocalDate.now(ZoneOffset.UTC).format(DateTimeFormatter.ofPattern("yyyyMMdd"))));
 
         final com.google.cloud.bigquery.Schema firstSchema = SchemaTranslator.translate(currentSchema);
         final TableDefinition tableDefinition = StandardTableDefinition.newBuilder()
@@ -592,7 +592,7 @@ public class BigqueryTransportProviderTests {
         when(bigQuery.getTable(tableId)).thenReturn(mockedTable);
 
         final TableId insertExceptionsTableId = TableId.of(tableId.getProject(), tableId.getDataset(),
-                String.format("%s$%s", exceptionsTableId.getTable(), LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"))));
+                String.format("%s$%s", exceptionsTableId.getTable(), LocalDate.now(ZoneOffset.UTC).format(DateTimeFormatter.ofPattern("yyyyMMdd"))));
 
         final TableDefinition exceptionsTableDefinition = StandardTableDefinition.newBuilder()
                 .setSchema(SchemaTranslator.translate(BigqueryTransportProvider.EXCEPTION_RECORD_SCHEMA))

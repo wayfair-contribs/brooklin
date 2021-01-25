@@ -56,6 +56,9 @@ public class BigqueryTransportProviderAdminFactory implements TransportProviderA
                                                                Properties transportProviderProperties) {
         final VerifiableProperties tpProperties = new VerifiableProperties(transportProviderProperties);
 
+        // Create a map to define datastream destination to configuration mappings and share with multiple components.
+        // Datastream destination to configuration mappings are initialized when new datastreams are created or assigned for processing.
+        // TODO: potentially replace the shared map with a datastream configuration registry implementation
         final Map<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> datastreamConfigByDestination = new ConcurrentHashMap<>();
         final String committerProjectId;
         final BigqueryBatchCommitter committer;

@@ -13,6 +13,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.StringUtils;
@@ -24,6 +25,7 @@ import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolverFactory;
 import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolverType;
 import com.linkedin.datastream.common.Datastream;
 import com.linkedin.datastream.common.DatastreamDestination;
+import com.linkedin.datastream.common.DatastreamRuntimeException;
 import com.linkedin.datastream.common.DatastreamSource;
 import com.linkedin.datastream.common.DatastreamUtils;
 import com.linkedin.datastream.server.DatastreamTask;
@@ -69,6 +71,8 @@ public class BigqueryTransportProviderAdmin implements TransportProviderAdmin {
     private final Map<Datastream, BigqueryTransportProvider> _datastreamTransportProvider;
     private final Map<BigqueryTransportProvider, Set<DatastreamTask>> _transportProviderTasks;
 
+    private final Pattern _legacyDatastreamDestinationConnectionStringPattern;
+
     private final Logger logger = LoggerFactory.getLogger(BigqueryTransportProviderAdmin.class);
 
     /**
@@ -92,6 +96,8 @@ public class BigqueryTransportProviderAdmin implements TransportProviderAdmin {
         this._legacyDefaultProjectId = legacyDefaultProjectId;
         this._legacyDefaultSchemaRegistryUrl = legacyDefaultSchemaRegistryUrl;
 
+        _legacyDatastreamDestinationConnectionStringPattern = Pattern.compile("^[^/]+/[^/]+(/[^/]*)?$");
+
         _datastreamTransportProvider = new ConcurrentHashMap<>();
         _transportProviderTasks = new ConcurrentHashMap<>();
     }
@@ -101,6 +107,15 @@ public class BigqueryTransportProviderAdmin implements TransportProviderAdmin {
     public TransportProvider assignTransportProvider(final DatastreamTask task) {
         // Assume that the task has a single datastream
         final Datastream datastream = task.getDatastreams().get(0);
+        // For legacy datastreams, update the destination connection string and late-init the destination name when record is sent
+        if (isLegacyDatastreamDestinationConnectionString(datastream.getDestination().getConnectionString())) {
+            try {
+                updateConnectionStringOnLegacyDatastream(datastream, "*");
+            } catch (final DatastreamValidationException e) {
+                logger.error("Unable to assign invalid datastream with name: {}", datastream.getName(), e);
+                throw new DatastreamRuntimeException("Unable to assign invalid datastream", e);
+            }
+        }
         return _datastreamTransportProvider.computeIfAbsent(datastream, d -> {
             final BigqueryDatastreamConfiguration configuration = getConfigurationFromDatastream(d);
             final BigqueryTransportProvider transportProvider =  _bigqueryTransportProviderFactory.createTransportProvider(_bufferedTransportProvider,
@@ -155,25 +170,30 @@ public class BigqueryTransportProviderAdmin implements TransportProviderAdmin {
             }
         }
 
-        if (destination.hasConnectionString()) {
+        if (destination.hasConnectionString() && !isLegacyDatastreamDestinationConnectionString(destination.getConnectionString())) {
             try {
                 BigqueryDatastreamDestination.parse(destination.getConnectionString());
             } catch (IllegalArgumentException e) {
                 throw new DatastreamValidationException("Bigquery datastream destination is malformed", e);
             }
         } else {
-            final String dataset = datastream.getMetadata().get(METADATA_DATASET_KEY);
-            if (StringUtils.isBlank(dataset)) {
-                throw new DatastreamValidationException("Metadata dataset is not set in the datastream definition.");
-            }
-
-            final BigqueryDatastreamDestination datastreamDestination = new BigqueryDatastreamDestination(
-                    _legacyDefaultProjectId,
-                    dataset,
-                    destinationName + datastream.getMetadata().getOrDefault(METADATA_TABLE_SUFFIX_KEY, "")
-            );
-            destination.setConnectionString(datastreamDestination.toString());
+            logger.warn("Updating connection string on legacy datastream with name: {}", datastream.getName());
+            updateConnectionStringOnLegacyDatastream(datastream, destinationName);
         }
+    }
+
+    private void updateConnectionStringOnLegacyDatastream(final Datastream datastream, final String destinationName) throws DatastreamValidationException {
+        final String dataset = datastream.getMetadata().get(METADATA_DATASET_KEY);
+        if (StringUtils.isBlank(dataset)) {
+            throw new DatastreamValidationException("Metadata dataset is not set in the datastream definition.");
+        }
+
+        final BigqueryDatastreamDestination datastreamDestination = new BigqueryDatastreamDestination(
+                _legacyDefaultProjectId,
+                dataset,
+                destinationName + datastream.getMetadata().getOrDefault(METADATA_TABLE_SUFFIX_KEY, "")
+        );
+        datastream.getDestination().setConnectionString(datastreamDestination.toString());
     }
 
     @Override
@@ -201,13 +221,7 @@ public class BigqueryTransportProviderAdmin implements TransportProviderAdmin {
         final Long partitionExpirationDays = Optional.ofNullable(metadata.get(METADATA_PARTITION_EXPIRATION_DAYS_KEY))
                 .map(Long::valueOf).orElse(null);
 
-        final BigqueryDatastreamDestination destination;
-        if (datastream.getDestination() != null && datastream.getDestination().hasConnectionString()) {
-            destination = BigqueryDatastreamDestination.parse(datastream.getDestination().getConnectionString());
-        } else {
-            final String dataset = metadata.get(METADATA_DATASET_KEY);
-            destination = new BigqueryDatastreamDestination(_legacyDefaultProjectId, dataset, "*");
-        }
+        final BigqueryDatastreamDestination destination = BigqueryDatastreamDestination.parse(datastream.getDestination().getConnectionString());
         final BigqueryDatastreamDestination deadLetterTable = BigqueryDatastreamDestination
                 .parse(metadata.getOrDefault(METADATA_DEAD_LETTER_TABLE_KEY, destination.toString() + "_exceptions"));
         final BigqueryDatastreamConfiguration deadLetterTableConfiguration = _bigqueryDatastreamConfigurationFactory.createBigqueryDatastreamConfiguration(
@@ -236,6 +250,10 @@ public class BigqueryTransportProviderAdmin implements TransportProviderAdmin {
                 labels,
                 schemaId
                 );
+    }
+
+    private boolean isLegacyDatastreamDestinationConnectionString(final String destinationConnectionString) {
+        return _legacyDatastreamDestinationConnectionStringPattern.matcher(destinationConnectionString).matches();
     }
 
     protected List<BigqueryLabel> parseLabelsString(final String labelsString) {

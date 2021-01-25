@@ -96,12 +96,27 @@ public class BigqueryTransportProvider implements TransportProvider {
 
     @Override
     public void send(final String destination, final DatastreamProducerRecord record, final SendCallback onComplete) {
-        final BigqueryDatastreamDestination datastreamDestination = BigqueryDatastreamDestination.parse(destination);
+        final BigqueryDatastreamDestination datastreamDestination = parseOrConstructDestination(destination, record);
         registerConfigurationForDestination(datastreamDestination, _datastreamConfiguration);
         final SendCallback callbackHandler = _datastreamConfiguration.getDeadLetterTableConfiguration()
                 .map(deadLetterTableConfiguration -> exceptionHandlingCallbackHandler(datastreamDestination, record, onComplete, deadLetterTableConfiguration))
                 .orElse(onComplete);
         _bufferedTransportProvider.send(destination, record, callbackHandler);
+    }
+
+    private BigqueryDatastreamDestination parseOrConstructDestination(final String destination, final DatastreamProducerRecord record) {
+        final BigqueryDatastreamDestination originalDestination = BigqueryDatastreamDestination.parse(destination);
+        final BigqueryDatastreamDestination finalDestination;
+        // Check for a datastream with a wildcard destination and replace the destination with the Kafka topic name.
+        // This condition should only occur for some legacy datastreams.
+        if (originalDestination.isWildcardDestination()) {
+            finalDestination = record.getEvents().stream().findAny()
+                    .map(event -> originalDestination.replaceWildcard(event.getMetadata().get(KAFKA_ORIGIN_TOPIC)))
+                    .orElse(originalDestination);
+        } else {
+            finalDestination = originalDestination;
+        }
+        return finalDestination;
     }
 
     private SendCallback exceptionHandlingCallbackHandler(final BigqueryDatastreamDestination datastreamDestination,

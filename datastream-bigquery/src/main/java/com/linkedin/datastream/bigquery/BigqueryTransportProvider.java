@@ -124,6 +124,11 @@ public class BigqueryTransportProvider implements TransportProvider {
                                                           final SendCallback onComplete,
                                                           final BigqueryDatastreamConfiguration deadLetterTableConfiguration) {
         return (metadata, exception) -> {
+            // If no exception is encountered or just a transient exception, then call the provided send callback.
+            // For transient exceptions, we expect the exception will resolve after some number of retries,
+            //   so call the regular send callback to let the connector handle the retries.
+            // For all other exceptions, we expect the exception is unrecoverable and will not resolve with a retry,
+            //   so create an exception record and send it to the exceptions/dead-letter table.
             if (exception == null || exception instanceof DatastreamTransientException) {
                 onComplete.onCompletion(metadata, exception);
             } else {

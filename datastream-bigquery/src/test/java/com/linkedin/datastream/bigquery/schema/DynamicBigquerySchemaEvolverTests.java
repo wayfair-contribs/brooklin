@@ -12,7 +12,11 @@ import org.testng.annotations.BeforeClass;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.Optional;
+
+import com.linkedin.datastream.bigquery.translator.SchemaTranslator;
 
 import static org.testng.Assert.assertEquals;
 
@@ -460,6 +464,41 @@ public class DynamicBigquerySchemaEvolverTests {
         ));
     }
 
+    @Test
+    public void testEvolveComplexSchema() throws IOException {
+        org.apache.avro.Schema avroSchema;
+        try (final InputStream avroFileInputStream = getClass().getClassLoader().getResourceAsStream("complex_avro_schema.avsc")) {
+            avroSchema = new org.apache.avro.Schema.Parser().parse(avroFileInputStream);
+        }
+        final Schema baseSchema = SchemaTranslator.translate(avroSchema);
+        final Schema newSchema = Schema.of(
+                Field.newBuilder("test", StandardSQLTypeName.STRING).setMode(Field.Mode.REQUIRED).build()
+        );
+        final Schema evolvedSchema = schemaEvolver.evolveSchema(baseSchema, newSchema);
+        assertEquals(evolvedSchema.getFields().size(), baseSchema.getFields().size() + 1);
+        for (int i = 0; i < baseSchema.getFields().size(); i++) {
+            final Field baseField = baseSchema.getFields().get(i);
+            final Field evolvedField = evolvedSchema.getFields().get(i);
+            assertFieldsEqual(baseField, evolvedField);
+        }
+        assertEquals(
+                evolvedSchema.getFields().get(evolvedSchema.getFields().size() - 1),
+                Field.newBuilder("test", StandardSQLTypeName.STRING).setMode(Field.Mode.NULLABLE).build()
+        );
+    }
+
+    private static void assertFieldsEqual(final Field baseField, final Field evolvedField) {
+        assertEquals(evolvedField.getName(), baseField.getName());
+        assertEquals(evolvedField.getType(), baseField.getType());
+        if (baseField.getSubFields() != null && !baseField.getSubFields().isEmpty()) {
+            assertEquals(evolvedField.getSubFields().size(), baseField.getSubFields().size());
+            for (int i = 0; i < baseField.getSubFields().size(); i++) {
+                final Field baseSubField = baseField.getSubFields().get(i);
+                final Field evolvedSubField = evolvedField.getSubFields().get(i);
+                assertFieldsEqual(baseSubField, evolvedSubField);
+            }
+        }
+    }
 
     private static Field requiredFieldOf(final String name, final StandardSQLTypeName type) {
         return Field.newBuilder(name, type).setMode(Field.Mode.REQUIRED).build();

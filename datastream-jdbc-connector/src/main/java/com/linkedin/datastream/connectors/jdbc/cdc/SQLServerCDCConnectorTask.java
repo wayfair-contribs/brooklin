@@ -8,6 +8,7 @@ package com.linkedin.datastream.connectors.jdbc.cdc;
 import com.linkedin.datastream.common.BrooklinEnvelope;
 import com.linkedin.datastream.common.BrooklinEnvelopeMetadataConstants;
 import com.linkedin.datastream.common.DatastreamRecordMetadata;
+import com.linkedin.datastream.metrics.DynamicMetricsManager;
 import com.linkedin.datastream.server.DatastreamEventProducer;
 import com.linkedin.datastream.server.DatastreamProducerRecord;
 import com.linkedin.datastream.server.DatastreamProducerRecordBuilder;
@@ -244,13 +245,27 @@ public class SQLServerCDCConnectorTask {
         _min_lsn_query = GET_MIN_LSN.replace(PLACE_HOLDER, _table);
     }
 
+    private boolean getNext(ResultSet resultSet) throws SQLException{
+        boolean hasNext;
+        long startTime = System.currentTimeMillis();
+        hasNext = resultSet.next();
+
+        DynamicMetricsManager.getInstance().createOrUpdateHistogram(
+                this.getClass().getSimpleName(), "getNext", "exec_time",
+                System.currentTimeMillis() - startTime);
+        return hasNext;
+
+    }
+
     private void translateAndSend(ResultSet resultSet) throws SQLException {
 
         int resultSetSize = 0;
 
         Schema avroSchema = getSchema(resultSet.getMetaData());
 
-        while (resultSet.next()) {
+        while (getNext(resultSet)) {
+
+            long startTime = System.currentTimeMillis();
             resultSetSize++;
             try {
                 ChangeEvent event = readChangeEvent(resultSet);
@@ -281,6 +296,10 @@ public class SQLServerCDCConnectorTask {
                 builder.addEvent(envelope);
                 builder.setEventsSourceTimestamp(System.currentTimeMillis());
                 DatastreamProducerRecord producerRecord = builder.build();
+
+                DynamicMetricsManager.getInstance().createOrUpdateHistogram(
+                        this.getClass().getSimpleName(), "translate", "exec_time",
+                        System.currentTimeMillis() - startTime);
 
                 _flushlessProducer.send(producerRecord, _id, 0, checkpoint,
                         (DatastreamRecordMetadata metadata, Exception exception) -> {

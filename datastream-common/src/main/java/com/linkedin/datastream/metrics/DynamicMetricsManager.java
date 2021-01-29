@@ -11,8 +11,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 import javax.annotation.Nullable;
 
-import com.wayfair.commons.metrics.influxdb.InfluxdbMetadata;
-import com.wayfair.commons.metrics.influxdb.InfluxdbMetricRegistry;
 import org.apache.commons.lang.Validate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -46,11 +44,9 @@ public class DynamicMetricsManager {
   // This is created solely for the createOrUpdate APIs, not by registerMetric because the former can be called
   // repeatedly to update the metric whereas the latter is typically only called once per metric during initialization.
   private final ConcurrentHashMap<String, ConcurrentHashMap<String, ConcurrentHashMap<String, Metric>>> _indexedMetrics;
-  // private MetricRegistry _metricRegistry;
-  // todo: make it generic to support both DropWizard API and Wayfair API
-  private InfluxdbMetricRegistry _metricRegistry;
+  private MetricRegistry _metricRegistry;
 
-  private DynamicMetricsManager(InfluxdbMetricRegistry metricRegistry) {
+  private DynamicMetricsManager(MetricRegistry metricRegistry) {
     _metricRegistry = metricRegistry;
     _indexedMetrics = new ConcurrentHashMap<>();
   }
@@ -58,7 +54,7 @@ public class DynamicMetricsManager {
   /**
    * Instantiate the singleton of DynamicMetricsManager; This is a no-op if it already exists.
    */
-  public static DynamicMetricsManager createInstance(InfluxdbMetricRegistry metricRegistry) {
+  public static DynamicMetricsManager createInstance(MetricRegistry metricRegistry) {
     return createInstance(metricRegistry, null);
   }
 
@@ -70,7 +66,7 @@ public class DynamicMetricsManager {
    * Note that all tests validating the same metrics must be run sequentially, otherwise race
    * condition will occur.
    */
-  public static DynamicMetricsManager createInstance(InfluxdbMetricRegistry metricRegistry, @Nullable String testName) {
+  public static DynamicMetricsManager createInstance(MetricRegistry metricRegistry, @Nullable String testName) {
     synchronized (DynamicMetricsManager.class) {
       if (_instance == null) {
         _instance = new DynamicMetricsManager(metricRegistry);
@@ -129,11 +125,11 @@ public class DynamicMetricsManager {
   @SuppressWarnings("unchecked")
   private <T extends Metric> T getMetric(String name, Class<T> clazz) {
     if (clazz.equals(Counter.class)) {
-      return (T) _metricRegistry.getMetricRegistry().counter(name);
+      return (T) _metricRegistry.counter(name);
     } else if (clazz.equals(Meter.class)) {
-      return (T) _metricRegistry.getMetricRegistry().meter(name);
+      return (T) _metricRegistry.meter(name);
     } else if (clazz.equals(Histogram.class)) {
-      return (T) _metricRegistry.getMetricRegistry().histogram(name);
+      return (T) _metricRegistry.histogram(name);
     } else if (clazz.equals(Gauge.class)) {
       return (T) new ResettableGauge<>();
     } else if (clazz.equals(Timer.class)) {
@@ -172,8 +168,7 @@ public class DynamicMetricsManager {
 
       try {
         // Gauge needs explicit registration
-        InfluxdbMetadata md = InfluxdbMetadata.forName(fullMetricName).build();
-        _metricRegistry.register(metric, md);
+        _metricRegistry.register(fullMetricName, metric);
       } catch (IllegalArgumentException e) {
         // This can happen with parallel unit tests
       }
@@ -283,8 +278,7 @@ public class DynamicMetricsManager {
 
     // create and register the metric if it does not exist
     Counter counter = (Counter) checkCache(classSimpleName, key, metricName).orElseGet(() -> {
-      String name = MetricRegistry.name(classSimpleName, key, metricName);
-      Counter newCounter = _metricRegistry.counter(InfluxdbMetadata.forName(name).build());
+      Counter newCounter = _metricRegistry.counter(MetricRegistry.name(classSimpleName, key, metricName));
       updateCache(classSimpleName, key, metricName, newCounter);
       return newCounter;
     });
@@ -314,10 +308,7 @@ public class DynamicMetricsManager {
 
     // create and register the metric if it does not exist
     Meter meter = (Meter) checkCache(classSimpleName, key, metricName).orElseGet(() -> {
-      // todo: write a method to generate all metadata
-      // todo: put key in tag
-      String name = MetricRegistry.name(classSimpleName, key, metricName);
-      Meter newMeter = _metricRegistry.meter(InfluxdbMetadata.forName(name).build());
+      Meter newMeter = _metricRegistry.meter(MetricRegistry.name(classSimpleName, key, metricName));
       updateCache(classSimpleName, key, metricName, newMeter);
       return newMeter;
     });
@@ -339,11 +330,11 @@ public class DynamicMetricsManager {
   private synchronized Histogram registerAndGetSlidingWindowHistogram(String fullMetricName, long windowTimeMs) {
     Histogram histogram = new Histogram(new SlidingTimeWindowArrayReservoir(windowTimeMs, TimeUnit.MILLISECONDS));
     try {
-      return _metricRegistry.register(histogram, InfluxdbMetadata.forName(fullMetricName).build());
+      return _metricRegistry.register(fullMetricName, histogram);
     } catch (IllegalArgumentException e) {
       // This could happen when multiple threads call createOrUpdateSlidingWindowHistogram simultaneously
       // In that case the line below will just return the one that got registered first.
-      return _metricRegistry.histogram(InfluxdbMetadata.forName(fullMetricName).build());
+      return _metricRegistry.histogram(fullMetricName);
     }
   }
 
@@ -381,8 +372,7 @@ public class DynamicMetricsManager {
     validateArguments(classSimpleName, metricName);
     // create and register the metric if it does not exist
     Histogram histogram = (Histogram) checkCache(classSimpleName, key, metricName).orElseGet(() -> {
-      String name = MetricRegistry.name(classSimpleName, key, metricName);
-      Histogram newHistogram = _metricRegistry.histogram(InfluxdbMetadata.forName(name).build());
+      Histogram newHistogram = _metricRegistry.histogram(MetricRegistry.name(classSimpleName, key, metricName));
       updateCache(classSimpleName, key, metricName, newHistogram);
       return newHistogram;
     });
@@ -416,7 +406,7 @@ public class DynamicMetricsManager {
   /**
    * Get metricRegistry object, it allows other module like Kafka client to wire in the same metricRegistry
    */
-  public InfluxdbMetricRegistry getMetricRegistry() {
+  public MetricRegistry getMetricRegistry() {
     return _metricRegistry;
   }
 }

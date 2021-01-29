@@ -144,7 +144,7 @@ public class KafkaTransportProvider<K, V> implements TransportProvider {
       // to determine the partition. If partitionKey does not exist, use the key value.
       keyValue = record.getPartitionKey().isPresent()
               ? (K) record.getPartitionKey().get().getBytes(StandardCharsets.UTF_8) : keyValue;
-      return new ProducerRecord<>(topicName, keyValue, payloadValue);
+      return new ProducerRecord<>(topicName, null, payloadValue);
     }
   }
 

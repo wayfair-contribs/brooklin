@@ -168,6 +168,9 @@ public class EventProducer implements DatastreamEventProducer {
    */
   @Override
   public void send(DatastreamProducerRecord record, SendCallback sendCallback) {
+    _dynamicMetricsManager.createOrUpdateMeter(MODULE, _datastreamTask.getConnectorType(), "sendCall", 1);
+
+
     try {
       validateEventRecord(record);
 
@@ -236,12 +239,12 @@ public class EventProducer implements DatastreamEventProducer {
       long sourceToDestinationLatencyMs = System.currentTimeMillis() - eventsSourceTimestamp;
       // Using a time sliding window for reporting latency specifically.
       // Otherwise we report very stuck max value for slow source
-      _dynamicMetricsManager.createOrUpdateSlidingWindowHistogram(MODULE, topicOrDatastreamName,
-          EVENTS_LATENCY_MS_STRING, LATENCY_SLIDING_WINDOW_LENGTH_MS, sourceToDestinationLatencyMs);
-      _dynamicMetricsManager.createOrUpdateSlidingWindowHistogram(MODULE, AGGREGATE, EVENTS_LATENCY_MS_STRING,
-          LATENCY_SLIDING_WINDOW_LENGTH_MS, sourceToDestinationLatencyMs);
-      _dynamicMetricsManager.createOrUpdateSlidingWindowHistogram(MODULE, _datastreamTask.getConnectorType(),
-          EVENTS_LATENCY_MS_STRING, LATENCY_SLIDING_WINDOW_LENGTH_MS, sourceToDestinationLatencyMs);
+      _dynamicMetricsManager.createOrUpdateHistogram(MODULE, topicOrDatastreamName,
+          EVENTS_LATENCY_MS_STRING, sourceToDestinationLatencyMs);
+      _dynamicMetricsManager.createOrUpdateHistogram(MODULE, AGGREGATE, EVENTS_LATENCY_MS_STRING,
+              sourceToDestinationLatencyMs);
+      _dynamicMetricsManager.createOrUpdateHistogram(MODULE, _datastreamTask.getConnectorType(),
+          EVENTS_LATENCY_MS_STRING, sourceToDestinationLatencyMs);
 
       reportSLAMetrics(topicOrDatastreamName, sourceToDestinationLatencyMs <= _availabilityThresholdSlaMs,
           EVENTS_PRODUCED_WITHIN_SLA, EVENTS_PRODUCED_OUTSIDE_SLA);

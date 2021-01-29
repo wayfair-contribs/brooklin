@@ -135,7 +135,7 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
      * @param schema table schema
      */
     public void setDestTableSchema(String dest, Schema schema) {
-        _destTableSchemas.putIfAbsent(dest, schema);
+        _destTableSchemas.put(dest, schema);
     }
 
     @Override

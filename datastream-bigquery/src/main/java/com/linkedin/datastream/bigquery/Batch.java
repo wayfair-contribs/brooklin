@@ -37,7 +37,6 @@ public class Batch extends AbstractBatch {
     private long _batchCreateTimeStamp;
 
     private org.apache.avro.Schema _avroSchema;
-    private Schema _schema;
     private SchemaRegistry _schemaRegistry;
     private String _destination;
     private KafkaAvroDeserializer _deserializer;
@@ -61,7 +60,6 @@ public class Batch extends AbstractBatch {
         this._committer = committer;
         this._batch = new ArrayList<>();
         this._batchCreateTimeStamp = System.currentTimeMillis();
-        this._schema = null;
         this._destination = null;
         this._schemaRegistry = schemaRegistry;
         this._deserializer = _schemaRegistry.getDeserializer();
@@ -107,11 +105,8 @@ public class Batch extends AbstractBatch {
                 }
             }
 
-            if (_schema == null) {
-                _avroSchema = _schemaRegistry.getSchemaByTopic(aPackage.getTopic());
-                _schema = SchemaTranslator.translate(_avroSchema);
-                _committer.setDestTableSchema(_destination, _schema);
-            }
+            _avroSchema = _schemaRegistry.getSchemaByTopic(aPackage.getTopic());
+            _committer.setDestTableSchema(_destination, SchemaTranslator.translate(_avroSchema));
 
             GenericRecord record;
             try {

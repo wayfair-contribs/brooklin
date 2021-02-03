@@ -15,15 +15,15 @@ public class AvroRecordTranslator {
         GenericRecord record = new GenericData.Record(avroSchema);
 
         // dataBefore could be null, dataAfter always has data
-        int dataFieldsLen = event.dataAfter.length;
+        int dataFieldsLen = event.getDataAfter().length;
 
         int fieldIdx = 0;
 
         // data before
         int endIdx = dataFieldsLen;
-        if (event.dataBefore != null) {
+        if (event.getDataBefore() != null) {
             for (; fieldIdx < endIdx; fieldIdx++) {
-                record.put(fieldIdx, event.dataBefore[fieldIdx]);
+                record.put(fieldIdx, event.getDataBefore()[fieldIdx]);
             }
         } else {
             fieldIdx += dataFieldsLen;
@@ -32,13 +32,13 @@ public class AvroRecordTranslator {
         // dataAfter
         endIdx += dataFieldsLen;
         for (; fieldIdx < endIdx; fieldIdx++) {
-            record.put(fieldIdx, event.dataAfter[fieldIdx-dataFieldsLen]);
+            record.put(fieldIdx, event.getDataAfter()[fieldIdx-dataFieldsLen]);
         }
 
         // meta columns
-        record.put(fieldIdx++, ByteBuffer.wrap(event.lsn) );
-        record.put(fieldIdx++, ByteBuffer.wrap(event.seq) );
-        record.put(fieldIdx++, event.op);
+        record.put(fieldIdx++, ByteBuffer.wrap(event.getCheckpoint().lsnBytes()) );
+        record.put(fieldIdx++, ByteBuffer.wrap(event.getSeqVal()) );
+        record.put(fieldIdx++, event.getOp());
 
         return record;
     }

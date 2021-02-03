@@ -195,7 +195,6 @@ class KafkaProducerWrapper<K, V> {
         producer.get().flush();
 
         producer.ifPresent(p -> p.send(producerRecord, (metadata, exception) -> {
-          _log.info("callback for producer.send. Exception is {}", exception);
           if (exception == null) {
             onComplete.onCompletion(metadata, null);
           } else {

@@ -63,11 +63,11 @@ public class SchemaTranslator {
 
         final int nrOfColumns = meta.getColumnCount();
 
-        // handle business columns after index 5
+        // handle business columns after index 6 to last-1
         /*
          * Some missing Avro types - Decimal, Date types. May need some additional work.
          */
-        for (int i = 5; i <= nrOfColumns; i++) {
+        for (int i = CDCQueryBuilder.DATA_COLUMN_START_INDEX; i < nrOfColumns; i++) {
             /*
              *   as per jdbc 4 specs, getColumnLabel will have the alias for the column, if not it will have the column name.
              *  so it may be a better option to check for columnlabel first and if in case it is null is someimplementation,

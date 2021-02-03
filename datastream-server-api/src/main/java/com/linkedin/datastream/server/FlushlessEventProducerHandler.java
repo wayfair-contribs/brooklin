@@ -181,6 +181,7 @@ public class FlushlessEventProducerHandler<T extends Comparable<T>> {
      * @param checkpoint the checkpoint to register
      */
     public synchronized void register(T checkpoint) {
+      LOG.debug("register checkpoint {}", checkpoint);
       _inFlight.add(checkpoint);
     }
 
@@ -190,6 +191,8 @@ public class FlushlessEventProducerHandler<T extends Comparable<T>> {
      * been received.
      */
     public synchronized void ack(T checkpoint) {
+      LOG.debug("removing checkpoint {}, _inFlight size = {}", checkpoint, _inFlight.size());
+
       if (!_inFlight.remove(checkpoint)) {
         LOG.error("Internal state error; could not remove checkpoint {}", checkpoint);
       }

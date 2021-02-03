@@ -8,6 +8,7 @@ package com.linkedin.datastream.connectors.jdbc.cdc;
 import com.linkedin.datastream.common.BrooklinEnvelope;
 import com.linkedin.datastream.common.BrooklinEnvelopeMetadataConstants;
 import com.linkedin.datastream.common.DatastreamRecordMetadata;
+import com.linkedin.datastream.common.DatastreamRuntimeException;
 import com.linkedin.datastream.metrics.DynamicMetricsManager;
 import com.linkedin.datastream.server.DatastreamEventProducer;
 import com.linkedin.datastream.server.DatastreamProducerRecord;
@@ -22,6 +23,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.sql.DataSource;
 import java.sql.*;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Optional;
 import java.util.concurrent.Executors;
@@ -52,7 +54,6 @@ public class SQLServerCDCConnectorTask {
     private CustomCheckpointProvider<Long> _checkpointProvider;
     private AtomicBoolean _resetToSafeCommit;
 
-    private static final String PLACE_HOLDER = "#";
     private static final String GET_MIN_LSN = "SELECT sys.fn_cdc_get_min_lsn('#')";
     private static final String GET_MAX_LSN = "SELECT sys.fn_cdc_get_max_lsn()";
 
@@ -64,7 +65,8 @@ public class SQLServerCDCConnectorTask {
     private String _min_lsn_query;
 
     // todo: should be persistent
-    private CDCCheckPoint _checkpoint;
+    private CDCCheckPoint _committedCheckpoint;
+    private CDCCheckPoint _processingCheckpoint;
 
     private Schema _avroSchema;
 
@@ -96,7 +98,7 @@ public class SQLServerCDCConnectorTask {
                     try {
                         execute();
                     } catch (Exception e) {
-                        LOG.warn("Failed poll.", e);
+                        LOG.error("Failed poll.", e);
                     }
                 },
                 _pollFrequencyMS,
@@ -133,7 +135,8 @@ public class SQLServerCDCConnectorTask {
     protected synchronized void mayCommitCheckpoint() {
         Optional<CDCCheckPoint> safeCheckpoint = _flushlessProducer.getAckCheckpoint(_id, 0);
         if (safeCheckpoint.isPresent()) {
-            _checkpoint = safeCheckpoint.get();
+            LOG.debug("Last safe checkpoint is {}", safeCheckpoint.get());
+            _committedCheckpoint = safeCheckpoint.get();
             if (_resetToSafeCommit.get()) {
                 // todo: should call rewind ??
                 _resetToSafeCommit.set(false);
@@ -144,35 +147,37 @@ public class SQLServerCDCConnectorTask {
     protected void execute() {
         LOG.info("CDC poll initiated for task {}", _id);
 
+        // Called right before a poll starts
         mayCommitCheckpoint();
+        seekProcessingCheckpoint();
 
-        try (Connection conn = _dataSource.getConnection()) {
-            initCheckpointIfNeeded(conn);
+        try (Connection conn = _dataSource.getConnection();
+            PreparedStatement preparedStatement = buildCDCStatement(conn);
+            ResultSet rs = preparedStatement.executeQuery()) {
 
-            byte[] fromLsn = _checkpoint.lsnBytes();
-            byte[] toLsn = getMaxLsn(conn);
-            LOG.info("CDC polling parameters: table = {}, checkpoint = {}, from_lsn = {}, to_lsn = {}",
-                    _table,
-                    _checkpoint,
-                    Utils.bytesToHex(fromLsn),
-                    Utils.bytesToHex(toLsn) );
-
-            if (fromLsn == null || toLsn == null) {
-                LOG.info("Either from or to LSN is not available. Quitting polling");
-                return;
-            }
-
-            captureChanges(conn, fromLsn, toLsn);
-
+            processChanges(rs);
             LOG.info("CDC poll ends for task {}", _id);
         } catch (SQLException e) {
-            LOG.error("Failed to poll for CDC table {}", _table, e);
+            LOG.error("Error in execute polling CDC table {}", _table, e);
+            throw new DatastreamRuntimeException("Error in execute polling CDC table.", e);
         }
     }
 
-    private void initCheckpointIfNeeded(Connection conn) {
-        if (_checkpoint == null) {
-            _checkpoint = new CDCCheckPoint(_table, getMinLSN(conn), null);
+    private void seekProcessingCheckpoint() {
+        // read from committed checkpoint
+        // if committed checkpoint is null. get initial value from db.
+        if (_committedCheckpoint != null) {
+            _processingCheckpoint = _committedCheckpoint;
+            return;
+        }
+
+        try (Connection conn = _dataSource.getConnection()) {
+            _committedCheckpoint = new CDCCheckPoint(_table, getMinLSN(conn), -1);
+            _processingCheckpoint = _committedCheckpoint;
+            LOG.info("CDC checkpoint: table = {}, checkpoint = {}", _table, _committedCheckpoint);
+        } catch (SQLException e) {
+            LOG.error("Failed to get min LSN for CDC table {}", _table, e);
+            throw new DatastreamRuntimeException("Error in seeking processing checkpoint.", e);
         }
     }
 
@@ -190,59 +195,32 @@ public class SQLServerCDCConnectorTask {
         return null;
     }
 
-    private byte[] getMaxLsn(Connection conn) {
-        // getToLsn: from < to ? to (use old) : getMaxLsn
-        try (PreparedStatement preparedStatement = conn.prepareStatement(GET_MAX_LSN) ){
+    private PreparedStatement buildCDCStatement(Connection conn) {
+        PreparedStatement preparedStatement = null;
+        try {
+            preparedStatement = conn.prepareStatement(_cdc_query);
 
-            try (ResultSet rs = preparedStatement.executeQuery()) {
-                return rs.next()
-                        ? rs.getBytes(1)
-                        : null;
-            }
-        } catch (SQLException e) {
-            LOG.error("Failed to get ToLsn when calling {}", INCREMENT_LSN, e);
-        }
+            preparedStatement.setBytes(1, _committedCheckpoint.lsnBytes());
+            preparedStatement.setInt(2, _committedCheckpoint.offset()+1);
+            preparedStatement.setInt(3, _maxPollRows);
 
-        return null;
-    }
-
-    private Lsn getIncrementalLsn(Connection conn, Lsn checkpoint) {
-        try (PreparedStatement preparedStatement = conn.prepareStatement(INCREMENT_LSN)) {
-            preparedStatement.setBytes(1, checkpoint.getBytes());
-
-            try (ResultSet rs = preparedStatement.executeQuery()) {
-                return rs.next() ? Lsn.valueOf(rs.getBytes(1))
-                        : Lsn.NULL;
-            }
-        } catch (SQLException e) {
-            LOG.error("Failed to get FromLsn. The query is {}", INCREMENT_LSN, e);
-        }
-        return Lsn.NULL;
-    }
-
-    private void captureChanges(Connection conn, byte[] fromLsn, byte[] toLsn) {
-        try (PreparedStatement preparedStatement = conn.prepareStatement(_cdc_query)) {
-
-            preparedStatement.setBytes(1, fromLsn);
-            preparedStatement.setBytes(2, toLsn);
-            preparedStatement.setMaxRows(_maxPollRows);
             preparedStatement.setFetchSize(_maxFetchSize);
-
-            try (ResultSet rs = preparedStatement.executeQuery()) {
-                translateAndSend(rs);
-            }
         } catch (SQLException e) {
-            LOG.error("Failed to run cdc functions. The query is {}", _cdc_query, e);
+            LOG.error("Error in build CDC statement", e);
+            throw new DatastreamRuntimeException("Error in build CDC statement", e);
         }
+
+        return preparedStatement;
     }
 
     private void generateQuery() {
         // todo: support more modes
 
         // _cdc_query = GET_ALL_CHANGES_AFTER.replace(PLACE_HOLDER, _table);
-        _cdc_query = GET_ALL_CHANGES_FOR_TABLE.replace(PLACE_HOLDER, _table);
+        // _cdc_query = GET_ALL_CHANGES_FOR_TABLE.replace(PLACE_HOLDER, _table);
 
-        _min_lsn_query = GET_MIN_LSN.replace(PLACE_HOLDER, _table);
+        _min_lsn_query = GET_MIN_LSN.replace(CDCQueryBuilder.PLACE_HOLDER, _table);
+        _cdc_query = new CDCQueryBuilderWithOffset(_table, true).generate();
     }
 
     private boolean getNext(ResultSet resultSet) throws SQLException{
@@ -257,40 +235,50 @@ public class SQLServerCDCConnectorTask {
 
     }
 
-    private void translateAndSend(ResultSet resultSet) throws SQLException {
+    private void processChanges(ResultSet resultSet) {
 
         int resultSetSize = 0;
 
-        Schema avroSchema = getSchema(resultSet.getMetaData());
+        Schema avroSchema = getSchemaFromResultSet(resultSet);
 
-        while (getNext(resultSet)) {
+        ChangeEvent preEvent = null;
+        try {
+            while (getNext(resultSet)) {
 
-            long startTime = System.currentTimeMillis();
-            resultSetSize++;
-            try {
-                ChangeEvent event = readChangeEvent(resultSet);
-                if (event == null) {
-                    // the only case where event is null is that data after is not in ResultSet
-                    continue;
+                long startTime = System.currentTimeMillis();
+                resultSetSize++;
+                updateProcessingCheckpoint(resultSet);
+
+                // for update before row, buffer and continue loop
+                int op = resultSet.getInt(CDCQueryBuilder.OP_INDEX);
+                ChangeEvent curEvent = null;
+                if (op == 3) { // the row before update
+                    // create a partial event
+                    curEvent = buildEventWithUpdateBefore(resultSet, _processingCheckpoint);
+                } else if (op == 4) { // the row after update
+                    // complete event
+                    curEvent = completeEventWithUpdateAfter(preEvent, resultSet, _processingCheckpoint);
+                } else { // insert or delete
+                    curEvent = buildEventWithInsertOrDelete(op, resultSet, _processingCheckpoint);
                 }
 
-                // Skip this event if processed last round of poll
-                if (isProcessedEvent(event)) {
-                    LOG.trace("The event [ lsn = {}, seq = {} ] is skipped",
-                            Utils.bytesToHex(event.lsn), Utils.bytesToHex(event.seq));
+                if (!curEvent.isComplete()) {
+                    preEvent = curEvent;
                     continue;
+                } else {
+                    preEvent = null;
                 }
 
-                LOG.trace("Translating and sending the event lsn = {}, seq = {}", Utils.bytesToHex(event.lsn), Utils.bytesToHex(event.seq));
+                if (LOG.isTraceEnabled()) {
+                    LOG.trace("Translating and sending the event {}", _processingCheckpoint);
+                }
 
-                GenericRecord record = AvroRecordTranslator.fromChangeEvent(avroSchema, event);
-
-                CDCCheckPoint checkpoint = new CDCCheckPoint(_table, event.lsn, event.seq);
+                GenericRecord record = AvroRecordTranslator.fromChangeEvent(avroSchema, curEvent);
 
                 HashMap<String, String> meta = new HashMap<>();
                 meta.put(BrooklinEnvelopeMetadataConstants.EVENT_TIMESTAMP, String.valueOf(System.currentTimeMillis()));
 
-                BrooklinEnvelope envelope = new BrooklinEnvelope(checkpoint.toBytes(), record, null, meta);
+                BrooklinEnvelope envelope = new BrooklinEnvelope(_processingCheckpoint.toString().getBytes(), record, null, meta);
 
                 DatastreamProducerRecordBuilder builder = new DatastreamProducerRecordBuilder();
                 builder.addEvent(envelope);
@@ -301,102 +289,108 @@ public class SQLServerCDCConnectorTask {
                         this.getClass().getSimpleName(), "translate", "exec_time",
                         System.currentTimeMillis() - startTime);
 
-                _flushlessProducer.send(producerRecord, _id, 0, checkpoint,
+                _flushlessProducer.send(producerRecord, _id, 0, _processingCheckpoint,
                         (DatastreamRecordMetadata metadata, Exception exception) -> {
                             if (exception == null) {
-                                LOG.trace("sent record {} successfully", checkpoint);
-                            } else  {
+                                if (LOG.isTraceEnabled()) {
+                                    LOG.trace("sent record {} successfully", metadata.getCheckpoint());
+                                }
+                            } else {
                                 _resetToSafeCommit.set(true);
-                                LOG.warn("failed to send record {}.", checkpoint, exception);
+                                LOG.warn("failed to send record {}.", metadata.getCheckpoint(), exception);
                             }
                         });
 
                 // todo
                 // _checkpointProvider.updateCheckpoint(checkpoint);
-                _checkpoint = checkpoint;
-            } catch (SQLException e) {
-                // todo: better error handling
-                LOG.warn("Error in current row.", e);
             }
+        } catch (SQLException e) {
+            LOG.error("Error in process change events.", e);
+            throw new DatastreamRuntimeException(e);
         }
-        LOG.debug("handled {} cdc events", resultSetSize);
-    }
-
-    private Schema getSchema(ResultSetMetaData metaData) {
-        // Use cached schema or parse from ResultSet
-        if (_avroSchema == null) {
-            _avroSchema = SchemaTranslator.fromResultSet(metaData);
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("handled {} cdc events. processing checkpoint is {}", resultSetSize, _processingCheckpoint);
         }
-        return _avroSchema;
     }
 
-    private boolean isProcessedEvent(ChangeEvent event) {
-        return _checkpoint.compare(event.lsn, event.seq) >= 0;
+    private void updateProcessingCheckpoint(ResultSet row) {
+        try {
+            byte[] lsn = row.getBytes(CDCQueryBuilder.LSN_INDEX);
+            int offset = Arrays.equals(lsn, _processingCheckpoint.lsnBytes())
+                    ? _processingCheckpoint.offset()+1 : 0;
+            _processingCheckpoint = new CDCCheckPoint(_table, lsn, offset);
+        } catch (SQLException e) {
+            throw new DatastreamRuntimeException(e);
+        }
     }
 
-    private ChangeEvent readChangeEvent(ResultSet row) throws SQLException {
+    private Schema getSchemaFromResultSet(ResultSet rs) {
+        try {
+            ResultSetMetaData metaData = rs.getMetaData();
+            // Use cached schema or parse from ResultSet
+            if (_avroSchema == null) {
+                _avroSchema = SchemaTranslator.fromResultSet(metaData);
+            }
+            return _avroSchema;
+        } catch (SQLException e) {
+            LOG.error("Failed to retrieve the schema of table {}", _table);
+            throw new DatastreamRuntimeException(e);
+        }
+    }
 
-        int op = row.getInt(3);
-        ChangeEvent event = op == 3
-                ? readEventForUpdate(row)
-                : readEventForInsertOrDelete(row);
-        LOG.debug("Get a change event {}", event);
+    private ChangeEvent buildEventWithInsertOrDelete(int op, ResultSet row, CDCCheckPoint checkpoint) {
+        long txTs = readTransactionTime(row);
+        ChangeEvent event = new ChangeEvent(null, null, op, txTs);
+        return completeEventWithUpdateAfter(event, row, checkpoint);
+    }
+
+    private ChangeEvent buildEventWithUpdateBefore(ResultSet row, CDCCheckPoint checkpoint) {
+        long txTs = readTransactionTime(row);
+        byte[] seqVal = readSeqVal(row);
+        Object[] dataBefore = readDataColumns(row);
+
+        ChangeEvent event = new ChangeEvent(checkpoint, seqVal, 3, txTs);
+        event.setUpdateBefore(dataBefore);
         return event;
     }
 
-    private ChangeEvent readEventForInsertOrDelete(ResultSet row) throws SQLException {
-        int numCols = row.getMetaData().getColumnCount();
-
-        byte[] lsn = row.getBytes(1);
-        byte[] seq = row.getBytes(2);
-        int op = row.getInt(3);
-
-        int size = numCols - 4;
-        Object[] dataAfter = new Object[size];  // exclude 4 meta columns
-        //  start from 5 as resultset starting from 1.
-        for (int i = 5; i <= numCols; i++) {
-            dataAfter[i - 5] = row.getObject(i);
-        }
-
-        // todo: code clean
-        ChangeEvent event = new ChangeEvent(lsn, seq, op);
-        event.dataAfter = dataAfter;
-
-        return event;
+    private ChangeEvent completeEventWithUpdateAfter(ChangeEvent preEvent, ResultSet row, CDCCheckPoint checkpoint) {
+        byte[] seqVal = readSeqVal(row);
+        Object[] dataAfter = readDataColumns(row);
+        preEvent.completeUpdate(dataAfter, seqVal, checkpoint);
+        return preEvent;
     }
 
-    private ChangeEvent readEventForUpdate(ResultSet row) throws SQLException {
-        int numCols = row.getMetaData().getColumnCount();
-
-        // read data before from first row
-        byte[] lsn = row.getBytes(1);
-        byte[] seq = row.getBytes(2);
-
-        int size = numCols - 4;
-        Object[] dataBefore = new Object[size];  // exclude 4 meta columns
-        //  start from 5 as resultset starting from 1.
-        for (int i = 5; i <= numCols; i++) {
-            dataBefore[i - 5] = row.getObject(i);
+    private long readTransactionTime(ResultSet row) {
+        try {
+            Timestamp ts = row.getTimestamp(CDCQueryBuilder.TRANSACTION_TIME_INDEX);
+            return ts == null ? 0 : ts.getTime();
+        } catch (SQLException e) {
+            throw new DatastreamRuntimeException(e);
         }
+    }
 
-        // try to read after from second row
-        if (!row.next()) {
-            LOG.debug("The after row is not available for update event");
-            return null;
+    private byte[] readSeqVal(ResultSet row) {
+        try {
+            return row.getBytes(CDCQueryBuilder.SEQVAL_INDEX);
+        } catch (SQLException e) {
+            throw new DatastreamRuntimeException(e);
         }
+    }
 
-        Object[] dataAfter = new Object[size];  // exclude 4 meta columns
-        //  start from 5 as resultset starting from 1.
-        for (int i = 5; i <= numCols; i++) {
-            dataAfter[i - 5] = row.getObject(i);
+    private Object[] readDataColumns(ResultSet row) {
+        try {
+            int numCols = row.getMetaData().getColumnCount();
+            int size = numCols - CDCQueryBuilder.META_COLUMN_NUM;
+            Object[] data = new Object[size];  // exclude 5 meta columns
+            //  read columns from 6 to last-1.
+            for (int i = CDCQueryBuilder.DATA_COLUMN_START_INDEX; i < numCols; i++) {
+                data[i - CDCQueryBuilder.DATA_COLUMN_START_INDEX] = row.getObject(i);
+            }
+            return data;
+        } catch (SQLException e) {
+            throw new DatastreamRuntimeException("Failed to read data columns in each row", e);
         }
-
-        // todo: code clean
-        ChangeEvent event = new ChangeEvent(lsn, seq, 3);
-        event.dataBefore = dataBefore;
-        event.dataAfter = dataAfter;
-
-        return event;
     }
 
     /**

@@ -25,7 +25,7 @@ public class BigqueryDatastreamDestination {
     private final boolean _wildcardDestination;
 
     private static final String SCHEME = "brooklin-bigquery";
-    private static final Pattern DESTINATION_PATTERN = Pattern.compile(SCHEME + "://([^.]+)\\.([^.]+)\\.([^.]+)");
+    private static final Pattern DESTINATION_PATTERN = Pattern.compile("^" + SCHEME + "://([^.]+)\\.([^.]+)\\.(.+)$");
     private static final Pattern WILDCARD_DESTINATION_PATTERN = Pattern.compile("^[^*]*\\*?[^*]*$");
 
     /**

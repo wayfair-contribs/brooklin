@@ -29,4 +29,13 @@ public class BigqueryDatastreamDestinationTests {
         );
     }
 
+    @Test
+    public void testParseDestinationWithPeriod() {
+        final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination("project_name", "dataset", "test.topic.with.period");
+        assertEquals(
+                BigqueryDatastreamDestination.parse("brooklin-bigquery://project_name.dataset.test.topic.with.period"),
+                destination
+        );
+    }
+
 }

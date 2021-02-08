@@ -15,7 +15,6 @@ import org.apache.kafka.common.errors.SerializationException;
 
 import com.google.cloud.bigquery.InsertAllRequest;
 import com.google.cloud.bigquery.Schema;
-import io.confluent.kafka.serializers.KafkaAvroDeserializer;
 
 import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolver;
 import com.linkedin.datastream.bigquery.translator.RecordTranslator;
@@ -23,6 +22,7 @@ import com.linkedin.datastream.bigquery.translator.SchemaTranslator;
 import com.linkedin.datastream.common.DatastreamRecordMetadata;
 import com.linkedin.datastream.common.Package;
 import com.linkedin.datastream.metrics.DynamicMetricsManager;
+import com.linkedin.datastream.serde.Deserializer;
 import com.linkedin.datastream.server.api.transport.buffered.AbstractBatch;
 
 /**
@@ -39,41 +39,44 @@ public class Batch extends AbstractBatch {
 
     private org.apache.avro.Schema _avroSchema;
     private Schema _schema;
-    private SchemaRegistry _schemaRegistry;
-    private String _destination;
-    private KafkaAvroDeserializer _deserializer;
+    private final BigqueryDatastreamDestination _destination;
+    private final Deserializer _valueDeserializer;
     private final BigquerySchemaEvolver _schemaEvolver;
+    private final org.apache.avro.Schema _fixedAvroSchema;
 
     /**
      * Constructor for Batch.
      * @param maxBatchSize any batch bigger than this threshold will be committed to BQ.
      * @param maxBatchAge any batch older than this threshold will be committed to BQ.
      * @param maxInflightWriteLogCommits maximum allowed batches in the commit backlog
-     * @param schemaRegistry schema registry client object
+     * @param valueDeserializer a Deserializer
      * @param committer committer object
      */
-    public Batch(int maxBatchSize,
-                 int maxBatchAge,
-                 int maxInflightWriteLogCommits,
-                 SchemaRegistry schemaRegistry,
-                 BigqueryBatchCommitter committer,
-                 BigquerySchemaEvolver schemaEvolver) {
+    public Batch(
+            final BigqueryDatastreamDestination destination,
+            final int maxBatchSize,
+            final int maxBatchAge,
+            final int maxInflightWriteLogCommits,
+            final Deserializer valueDeserializer,
+            final BigqueryBatchCommitter committer,
+            final BigquerySchemaEvolver schemaEvolver,
+            final org.apache.avro.Schema fixedAvroSchema
+    ) {
         super(maxInflightWriteLogCommits);
+        this._destination = destination;
         this._maxBatchSize = maxBatchSize;
         this._maxBatchAge = maxBatchAge;
         this._committer = committer;
+        this._valueDeserializer = valueDeserializer;
+        this._schemaEvolver = schemaEvolver;
+        this._fixedAvroSchema = fixedAvroSchema;
         this._batch = new ArrayList<>();
         this._batchCreateTimeStamp = System.currentTimeMillis();
         this._schema = null;
-        this._destination = null;
-        this._schemaRegistry = schemaRegistry;
-        this._deserializer = _schemaRegistry.getDeserializer();
-        this._schemaEvolver = schemaEvolver;
     }
 
     private void reset() {
         _batch.clear();
-        _destination = null;
         _ackCallbacks.clear();
         _recordMetadata.clear();
         _sourceTimestamps.clear();
@@ -98,28 +101,12 @@ public class Batch extends AbstractBatch {
                 return;
             }
 
-            if (_destination == null) {
-                String[] datasetRetentionTableSuffix = aPackage.getDestination().split("/");
-                if (datasetRetentionTableSuffix.length == 3) {
-                    _destination = datasetRetentionTableSuffix[0] +
-                            "/" + aPackage.getTopic() + datasetRetentionTableSuffix[2] +
-                            "/" + datasetRetentionTableSuffix[1];
-                } else {
-                    _destination = datasetRetentionTableSuffix[0] +
-                            "/" + aPackage.getTopic() +
-                            "/" + datasetRetentionTableSuffix[1];
-                }
-                _committer.setDestTableSchemaEvolver(_destination, _schemaEvolver);
-            }
-
-            GenericRecord record;
+            final GenericRecord record;
             try {
-                record = (GenericRecord) _deserializer.deserialize(
-                        aPackage.getTopic(),
-                        (byte[]) aPackage.getRecord().getValue());
+                record = (GenericRecord) _valueDeserializer.deserialize((byte[]) aPackage.getRecord().getValue());
             } catch (SerializationException e) {
                 if (e.getCause() instanceof BufferUnderflowException) {
-                    LOG.warn("Skipping message at Topic {} - Partition {} - Offset {} - Reason {} - Exception {}",
+                    LOG.warn("Error deserializing message at Topic {} - Partition {} - Offset {} - Reason {} - Exception {}",
                             aPackage.getTopic(),
                             aPackage.getPartition(),
                             aPackage.getOffset(),
@@ -130,15 +117,15 @@ public class Batch extends AbstractBatch {
                             aPackage.getTopic(),
                             "deserializerErrorCount",
                             1);
-                    aPackage.getAckCallback().onCompletion(new DatastreamRecordMetadata(
-                            aPackage.getCheckpoint(), aPackage.getTopic(), aPackage.getPartition()), null);
-                    return;
-                } else {
-                    throw e;
                 }
+                throw e;
             }
 
-            processAvroSchema(record.getSchema());
+            if (_fixedAvroSchema == null) {
+                processAvroSchema(record.getSchema());
+            } else {
+                processAvroSchema(_fixedAvroSchema);
+            }
 
             _batch.add(RecordTranslator.translate(record));
 
@@ -179,11 +166,11 @@ public class Batch extends AbstractBatch {
             incrementInflightWriteLogCommits();
             _committer.commit(
                     new ArrayList<>(_batch),
-                    _destination,
+                    _destination.toString(),
                     new ArrayList<>(_ackCallbacks),
                     new ArrayList<>(_recordMetadata),
                     new ArrayList<>(_sourceTimestamps),
-                    () -> decrementInflightWriteLogCommitsAndNotify()
+                    this::decrementInflightWriteLogCommitsAndNotify
             );
             reset();
             if (force) {

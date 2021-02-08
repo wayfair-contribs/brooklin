@@ -10,7 +10,9 @@ import com.google.cloud.bigquery.Schema;
 /**
  * A NoOp implementation of a BigquerySchemaEvolver.
  */
-public class NoOpBigquerySchemaEvolver implements BigquerySchemaEvolver {
+public class FixedBigquerySchemaEvolver implements BigquerySchemaEvolver {
+
+    protected FixedBigquerySchemaEvolver() { }
 
     @Override
     public Schema evolveSchema(final Schema baseSchema, final Schema newSchema) throws IncompatibleSchemaEvolutionException {

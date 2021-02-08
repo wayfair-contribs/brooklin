@@ -9,6 +9,16 @@ package com.linkedin.datastream.bigquery.schema;
  * An enumeration of BigQuerySchemaEvolver types.
  */
 public enum BigquerySchemaEvolverType {
-    simple,
-    noop
+    dynamic("DynamicSchema"),
+    fixed("FixedSchema");
+
+    private final String _modeName;
+
+    BigquerySchemaEvolverType(final String modeName) {
+        this._modeName = modeName;
+    }
+
+    public String getModeName() {
+        return _modeName;
+    }
 }

@@ -3,22 +3,21 @@
  *  Licensed under the BSD 2-Clause License. See the LICENSE file in the project root for license information.
  *  See the NOTICE file in the project root for additional information regarding copyright ownership.
  */
-package com.linkedin.datastream.bigquery.schema;
+package com.linkedin.datastream.bigquery.translator;
 
 import com.linkedin.datastream.common.DatastreamRuntimeException;
 
 /**
- * An exception indicating that a requested schema evolution was incompatible.
+ * A DatastreamRuntimeException that is thrown when a schema fails to translate.
  */
-public class IncompatibleSchemaEvolutionException extends DatastreamRuntimeException {
-
-    private static final long serialVersionUID = -1;
+public class SchemaTranslationException extends DatastreamRuntimeException {
+    private static final long serialVersionUID = 1;
 
     /**
      * Constructor.
-     * @param message the message
+     * @param message a String
      */
-    public IncompatibleSchemaEvolutionException(final String message) {
+    public SchemaTranslationException(final String message) {
         super(message);
     }
 

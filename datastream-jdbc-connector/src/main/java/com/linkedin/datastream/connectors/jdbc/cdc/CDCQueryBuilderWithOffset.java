@@ -26,7 +26,7 @@ public class CDCQueryBuilderWithOffset implements CDCQueryBuilder {
 
     @Override
     public String generate() {
-        String q = withTimestamp ? QUERY : QUERY_WITH_TS;
+        String q = withTimestamp ? QUERY_WITH_TS : QUERY;
         return q.replace(PLACE_HOLDER, captureInstanceName);
     }
 }

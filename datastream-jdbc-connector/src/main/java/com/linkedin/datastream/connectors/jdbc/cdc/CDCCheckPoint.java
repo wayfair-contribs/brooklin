@@ -1,36 +1,43 @@
 package com.linkedin.datastream.connectors.jdbc.cdc;
 
+import com.linkedin.datastream.common.DatastreamRuntimeException;
+import com.linkedin.datastream.server.providers.PersistableCheckpoint;
 import org.jetbrains.annotations.NotNull;
 
-public class CDCCheckPoint implements Comparable<CDCCheckPoint> {
+import java.util.Arrays;
 
-    private String captureInstName;
+public class CDCCheckPoint implements PersistableCheckpoint, Comparable<CDCCheckPoint> {
+
     private byte[] lsn;
     private int offset;
 
     private int[] lsnUnsignedBinary;
 
-    public CDCCheckPoint(String captureInstName, byte[] lsn, int offset) {
-        this.captureInstName = captureInstName;
+    public CDCCheckPoint(byte[] lsn, int offset) {
         this.lsn = lsn;
         this.offset = offset;
-    }
-
-    public void incrementOffset() {
-        offset++;
-    }
-
-    public void resetOffset() {
-        offset = 0;
     }
 
     public int offset() {
         return offset;
     }
 
+    /**
+     * Serialize CDC checkpoint to byte array
+     * format: [lsn (10 bytes) + offset (4 bytes)]
+     * @return
+     */
     @Override
-    public int compareTo(@NotNull CDCCheckPoint ckpt) {
-        return compare(ckpt.lsn, ckpt.offset);
+    public byte[] serialize() {
+        // Assume lsn is never null
+        byte[] buf = Arrays.copyOf(lsn, 14);
+        System.arraycopy(Utils.intToBytes(offset), 0, buf, 10, 4);
+        return buf;
+    }
+
+    @Override
+    public int compareTo(@NotNull CDCCheckPoint checkpoint) {
+        return compare(checkpoint.lsn, checkpoint.offset);
     }
 
     @Override
@@ -80,5 +87,17 @@ public class CDCCheckPoint implements Comparable<CDCCheckPoint> {
             unsignedBinary[i] = Byte.toUnsignedInt(binary[i]);
         }
         return unsignedBinary;
+    }
+
+    public static class Deserializer implements PersistableCheckpoint.Deserializer {
+
+        @Override
+        public <T extends PersistableCheckpoint> T deserialize(byte[] value, Class<T> checkpointClass) {
+            // Assume the length is 14
+            byte[] lsn = Arrays.copyOfRange(value, 0, 10);
+            int offset = Utils.bytesToInt(value, 10);
+
+            return checkpointClass.cast(new CDCCheckPoint(lsn, offset));
+        }
     }
 }

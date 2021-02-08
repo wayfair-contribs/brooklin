@@ -20,6 +20,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import javax.sql.DataSource;
 
+import com.linkedin.datastream.connectors.jdbc.cdc.CDCCheckPoint;
+import com.linkedin.datastream.connectors.jdbc.cdc.JDBCCheckpoint;
 import org.apache.avro.generic.GenericRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -53,13 +55,14 @@ public class JDBCConnectorTask {
     private final String _checkpointStorerURL;
     private final String _checkpointStoreTopic;
     private final String _destinationTopic;
-    private final FlushlessEventProducerHandler<Long> _flushlessProducer;
+    private final FlushlessEventProducerHandler<JDBCCheckpoint> _flushlessProducer;
     private final int _maxPollRows;
     private final int _maxFetchSize;
 
     private String _id;
-    private CustomCheckpointProvider<Long> _checkpointProvider;
+    private CustomCheckpointProvider<JDBCCheckpoint, JDBCCheckpoint.Deserializer> _checkpointProvider;
     private AtomicBoolean _resetToSafeCommit;
+    private JDBCCheckpoint _committingCheckpoint;
 
     private JDBCConnectorTask(JDBCConnectorTaskBuilder builder) {
         this._datastreamName = builder._datastreamName;
@@ -92,14 +95,17 @@ public class JDBCConnectorTask {
         ArrayList<GenericRecord> arrayRecords = resultSetTranslator.translateToInternalFormat(resultSet);
 
         for (GenericRecord record : arrayRecords) {
-            Long checkpoint = (record.get(_incrementingColumnName) instanceof Integer) ?
+            Long checkpointVal = (record.get(_incrementingColumnName) instanceof Integer) ?
                     Long.valueOf((Integer) record.get(_incrementingColumnName)) :
                     (Long) record.get(_incrementingColumnName);
-            if (checkpoint == null) {
+            if (checkpointVal == null) {
                 LOG.error("failed to send row because checkpoint is null in datastream: {}", _datastreamName);
                 return;
             }
-            GenericRecord checkpointRecord = longTranslator.translateToInternalFormat(checkpoint);
+
+            JDBCCheckpoint checkpoint = new JDBCCheckpoint(checkpointVal);
+
+            GenericRecord checkpointRecord = longTranslator.translateToInternalFormat(checkpoint.offset());
             HashMap<String, String> meta = new HashMap<>();
             meta.put(BrooklinEnvelopeMetadataConstants.EVENT_TIMESTAMP, String.valueOf(System.currentTimeMillis()));
             BrooklinEnvelope envelope = new BrooklinEnvelope(checkpointRecord, record, null, meta);
@@ -114,19 +120,19 @@ public class JDBCConnectorTask {
                             LOG.warn("failed to send row {}. {}", checkpoint, exception);
                         }
                     });
-            _checkpointProvider.updateCheckpoint(checkpoint);
+            _committingCheckpoint = checkpoint;
         }
-
     }
 
     private synchronized void mayCommitCheckpoint() {
-        Optional<Long> safeCheckpoint = _flushlessProducer.getAckCheckpoint(_id, 0);
+        Optional<JDBCCheckpoint> safeCheckpoint = _flushlessProducer.getAckCheckpoint(_id, 0);
         if (safeCheckpoint.isPresent()) {
-            if (_resetToSafeCommit.get()) {
-                _checkpointProvider.rewindTo(safeCheckpoint.get());
+            LOG.debug("New safe checkpoint is {}", safeCheckpoint.get());
+            _checkpointProvider.commit(safeCheckpoint.get());
+
+            if (_resetToSafeCommit.get()) { // Something wrong, rewind committingCheckpoint
+                _committingCheckpoint = safeCheckpoint.get();
                 _resetToSafeCommit.set(false);
-            } else {
-                _checkpointProvider.commit(safeCheckpoint.get());
             }
         }
     }
@@ -143,25 +149,28 @@ public class JDBCConnectorTask {
     }
 
     private void poll() {
-        Long checkpoint = null;
         LOG.info("poll initiated for {}", _datastreamName);
 
         mayCommitCheckpoint();
-        try {
-            checkpoint = _checkpointProvider.getSafeCheckpoint();
-        } catch (Exception e) {
-            LOG.error("Ignoring this poll because of exception caught {}", e);
-            return;
-        }
-        checkpoint = (checkpoint == null) ? getInitialCheckpoint() : checkpoint;
 
-        LOG.info("start checkpoint for datastream:{} is {} with destination {}", _datastreamName, checkpoint, _destinationTopic);
+        if (_committingCheckpoint == null) {
+            // try getting checkpoint from CheckpointProvider.
+            _committingCheckpoint = _checkpointProvider.getSafeCheckpoint(
+                    () -> new JDBCCheckpoint.Deserializer(),
+                    JDBCCheckpoint.class);
+        }
+
+        if (_committingCheckpoint == null) {
+            _committingCheckpoint = new JDBCCheckpoint(getInitialCheckpoint());
+        }
+
+        LOG.info("start checkpoint for datastream:{} is {} with destination {}", _datastreamName, _committingCheckpoint, _destinationTopic);
 
         try (Connection conn = _dataSource.getConnection()) {
             try (PreparedStatement preparedStatement = conn.prepareStatement(generateStatement())) {
                 preparedStatement.setMaxRows(_maxPollRows);
                 preparedStatement.setFetchSize(_maxFetchSize);
-                preparedStatement.setLong(1, checkpoint);
+                preparedStatement.setLong(1, _committingCheckpoint.offset()); // Todo: should +1 ?
 
                 try (ResultSet rs = preparedStatement.executeQuery()) {
                     this.processResults(rs);
@@ -177,7 +186,7 @@ public class JDBCConnectorTask {
      */
     public void start() {
         _id = generateID();
-        this._checkpointProvider = new KafkaCustomCheckpointProvider(_id, _checkpointStorerURL, _checkpointStoreTopic);
+        this._checkpointProvider = new KafkaCustomCheckpointProvider<>(_id, _checkpointStorerURL, _checkpointStoreTopic);
         _scheduler.scheduleWithFixedDelay(() -> {
                     try {
                         this.poll();

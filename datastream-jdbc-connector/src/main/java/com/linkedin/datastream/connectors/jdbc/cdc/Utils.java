@@ -14,11 +14,25 @@ public class Utils {
         return String.valueOf(hexChars);
     }
 
-    public static String toHexString(byte[] byteArray) {
-        StringBuffer hexStringBuffer = new StringBuffer();
-        for (int i = 0; i < byteArray.length; i++) {
-            hexStringBuffer.append(String.format("%2x", byteArray[i]));
+    public static byte[] intToBytes(int l) {
+        byte[] result = new byte[4];
+        for (int i = 3; i >= 0; i--) {
+            result[i] = (byte)(l & 0xFF);
+            l >>= 4;
         }
-        return hexStringBuffer.toString();
+        return result;
+    }
+
+    public static int bytesToInt(final byte[] b) {
+        return bytesToInt(b, 0);
+    }
+
+    public static int bytesToInt(final byte[] b, final int from) {
+        int result = 0;
+        for (int i = from; i < from+4; i++) {
+            result <<= 4;
+            result |= (b[i] & 0xFF);
+        }
+        return result;
     }
 }

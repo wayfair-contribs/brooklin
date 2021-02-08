@@ -281,8 +281,10 @@ public class EventProducer implements DatastreamEventProducer {
       _dynamicMetricsManager.createOrUpdateHistogram(MODULE, _datastreamTask.getConnectorType(),
           EVENTS_SEND_LATENCY_MS_STRING, sendLatency);
     }
+
     _dynamicMetricsManager.createOrUpdateMeter(MODULE, AGGREGATE, EVENT_PRODUCE_RATE, 1);
     _dynamicMetricsManager.createOrUpdateMeter(MODULE, _datastreamTask.getConnectorType(), EVENT_PRODUCE_RATE, 1);
+    _dynamicMetricsManager.createOrUpdateMeter(MODULE, topicOrDatastreamName, EVENT_PRODUCE_RATE, 1);
   }
 
   private void onSendCallback(DatastreamRecordMetadata metadata, Exception exception, SendCallback sendCallback,

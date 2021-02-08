@@ -5,6 +5,8 @@
  */
 package com.linkedin.datastream.server.providers;
 
+import java.util.function.Supplier;
+
 /**
  * An abstraction for the connector to maintain information about the progress made
  * in processing {@link com.linkedin.datastream.server.DatastreamTask}s, e.g. checkpoints/offsets.
@@ -12,21 +14,8 @@ package com.linkedin.datastream.server.providers;
  *
  * @param <T> checkpoint value type
  */
-public interface CustomCheckpointProvider<T> {
-
-    /**
-     * Update the checkpoint to the given checkpoint.
-     * This checkpoint may not be persisted to underlying checkpoint store.
-     * @param checkpoint new checkpoint
-     */
-    void updateCheckpoint(T checkpoint);
-
-    /**
-     * Rewind the checkpoint to last know safe checkpoint.
-     * The safe checkpoint must be provided by the caller.
-     * @param checkpoint checkpoint to rewind to
-     */
-    void rewindTo(T checkpoint);
+public interface CustomCheckpointProvider<T extends PersistableCheckpoint,
+        S extends PersistableCheckpoint.Deserializer> {
 
     /**
      * Persist the safe checkpoint to the underlying checkpoint store
@@ -43,11 +32,5 @@ public interface CustomCheckpointProvider<T> {
      * get safe checkpoint
      * @return last known safe checkpoint
      */
-    T getSafeCheckpoint() throws Exception;
-
-    /**
-     * get last committed checkpoint
-     * @return last committed checkpoint
-     */
-    T getCommitted() throws Exception;
+    T getSafeCheckpoint(Supplier<S> deserSupplier, Class<T> checkpointClass);
 }

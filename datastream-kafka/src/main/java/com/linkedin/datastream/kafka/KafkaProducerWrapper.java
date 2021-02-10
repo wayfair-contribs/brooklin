@@ -49,6 +49,7 @@ import static com.linkedin.datastream.kafka.factory.KafkaProducerFactory.DOMAIN_
 
 
 class KafkaProducerWrapper<K, V> {
+  Logger LOG = LoggerFactory.getLogger(KafkaProducerWrapper.class);
   private static final String CLASS_NAME = KafkaProducerWrapper.class.getSimpleName();
   private static final String PRODUCER_ERROR = "producerError";
   @VisibleForTesting
@@ -192,7 +193,6 @@ class KafkaProducerWrapper<K, V> {
       try {
         ++numberOfAttempt;
         Optional<Producer<K, V>> producer = maybeGetKafkaProducer(task);
-        producer.get().flush();
 
         producer.ifPresent(p -> p.send(producerRecord, (metadata, exception) -> {
           if (exception == null) {

@@ -57,6 +57,7 @@ public class ChangeEvent {
 
     public void setUpdateBefore(Object[] dataBefore) {
         this.dataBefore = dataBefore;
+        isCompleted = false;
     }
 
     public void completeUpdate(Object[] dataAfter, byte[] seqVal, CDCCheckPoint checkpoint) {
@@ -64,6 +65,7 @@ public class ChangeEvent {
         this.dataAfter = dataAfter;
         this.seqVal = seqVal;
         this.isCompleted = true;
+        this.op = 4;
     }
 
     public boolean isComplete() {
@@ -73,10 +75,13 @@ public class ChangeEvent {
     @Override
     public String toString() {
         return "ChangeEvent{" +
-                "op=" + op +
-                ", dataBefore=" + Arrays.toString(dataBefore) +
-                ", dataAfter=" + Arrays.toString(dataAfter) +
+                "txStartTime=" + txStartTime +
+                ", op=" + op +
+                ", seqVal=" + Arrays.toString(seqVal) +
                 ", checkpoint=" + checkpoint +
+                ", isCompleted=" + isCompleted +
+                ", dataBefore=" + dataBefore +
+                ", dataAfter=" + dataAfter +
                 '}';
     }
 }

@@ -4,7 +4,7 @@ public class CDCQueryBuilderWithOffset implements CDCQueryBuilder {
     private static final String QUERY =
             "SELECT * FROM cdc.#_CT WITH (NOLOCK)" +
                     "WHERE __$start_lsn >= ? " +
-                    "ORDER BY __$start_lsn " +
+                    "ORDER BY __$start_lsn, __$command_id, __$seqval, __$operation " +
                     "OFFSET ? ROWS " +
                     "FETCH NEXT ? ROWS ONLY ";
 
@@ -12,7 +12,7 @@ public class CDCQueryBuilderWithOffset implements CDCQueryBuilder {
             "SELECT sys.fn_cdc_map_lsn_to_time( __$start_lsn) as lsn_ts, *" +
                     "FROM cdc.#_CT WITH (NOLOCK)" +
                     "WHERE __$start_lsn >= ? " +
-                    "ORDER BY __$start_lsn " +
+                    "ORDER BY __$start_lsn, __$command_id, __$seqval, __$operation " +
                     "OFFSET ? ROWS " +
                     "FETCH NEXT ? ROWS ONLY ";
 

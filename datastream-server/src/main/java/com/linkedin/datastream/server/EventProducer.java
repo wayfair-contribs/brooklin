@@ -53,6 +53,7 @@ public class EventProducer implements DatastreamEventProducer {
 
   static final String EVENTS_LATENCY_MS_STRING = "eventsLatencyMs";
   static final String EVENTS_SEND_LATENCY_MS_STRING = "eventsSendLatencyMs";
+  static final String EVENTS_PRODUCE_LATENCY_MS_STRING = "eventsProduceLatencyMs";
 
   private static final String MODULE = EventProducer.class.getSimpleName();
   private static final String METRICS_PREFIX = MODULE + MetricsAware.KEY_REGEX;
@@ -194,7 +195,9 @@ public class EventProducer implements DatastreamEventProducer {
           record.getDestination().orElse(_datastreamTask.getDatastreamDestination().getConnectionString());
       record.setEventsSendTimestamp(System.currentTimeMillis());
       _transportProvider.send(destination, record,
-          (metadata, exception) -> onSendCallback(metadata, exception, sendCallback, record.getEventsSourceTimestamp(),
+          (metadata, exception) -> onSendCallback(metadata, exception, sendCallback,
+              record.getEventsProduceTimestamp().orElse(0L),
+              record.getEventsSourceTimestamp(),
               record.getEventsSendTimestamp().orElse(0L)));
     } catch (Exception e) {
       String errorMessage = String.format("Failed send the event %s exception %s", record, e);
@@ -229,7 +232,10 @@ public class EventProducer implements DatastreamEventProducer {
    * per DatastreamProducerRecord (i.e. by the number of events within the record), only increment all metrics by 1
    * to avoid overcounting.
    */
-  private void reportMetrics(DatastreamRecordMetadata metadata, long eventsSourceTimestamp, long eventsSendTimestamp) {
+  private void reportMetrics(DatastreamRecordMetadata metadata,
+                             long eventProduceTimestamp,
+                             long eventsSourceTimestamp,
+                             long eventsSendTimestamp) {
     // If per-topic metrics are enabled, use topic as key for metrics; else, use datastream name as the key
     String datastreamName = getDatastreamName();
     String topicOrDatastreamName = _enablePerTopicMetrics ? metadata.getTopic() : datastreamName;
@@ -272,6 +278,16 @@ public class EventProducer implements DatastreamEventProducer {
           1);
     }
 
+    // CDC e2e latency
+    if (eventProduceTimestamp > 0) {
+      long produceLatency = System.currentTimeMillis() - eventProduceTimestamp;
+      _dynamicMetricsManager.createOrUpdateHistogram(MODULE, topicOrDatastreamName, EVENTS_PRODUCE_LATENCY_MS_STRING,
+              produceLatency);
+      _dynamicMetricsManager.createOrUpdateHistogram(MODULE, AGGREGATE, EVENTS_PRODUCE_LATENCY_MS_STRING, produceLatency);
+      _dynamicMetricsManager.createOrUpdateHistogram(MODULE, _datastreamTask.getConnectorType(),
+              EVENTS_PRODUCE_LATENCY_MS_STRING, produceLatency);
+    }
+
     // Report the time it took to just send the events to destination
     if (eventsSendTimestamp > 0) {
       long sendLatency = System.currentTimeMillis() - eventsSendTimestamp;
@@ -288,7 +304,9 @@ public class EventProducer implements DatastreamEventProducer {
   }
 
   private void onSendCallback(DatastreamRecordMetadata metadata, Exception exception, SendCallback sendCallback,
-      long eventSourceTimestamp, long eventSendTimestamp) {
+                              long eventProduceTimestamp,
+                              long eventSourceTimestamp,
+                              long eventSendTimestamp) {
 
     SendFailedException sendFailedException = null;
 
@@ -299,7 +317,7 @@ public class EventProducer implements DatastreamEventProducer {
     } else {
       // Report metrics
       checkpoint(metadata.getPartition(), metadata.getCheckpoint());
-      reportMetrics(metadata, eventSourceTimestamp, eventSendTimestamp);
+      reportMetrics(metadata, eventProduceTimestamp, eventSourceTimestamp, eventSendTimestamp);
     }
 
     // Inform the connector about the success or failure, In the case of failure,

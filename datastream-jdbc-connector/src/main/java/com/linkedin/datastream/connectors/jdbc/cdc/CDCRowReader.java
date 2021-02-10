@@ -73,4 +73,12 @@ public class CDCRowReader {
             throw new DatastreamRuntimeException("Failed to read data columns in each row", e);
         }
     }
+
+    public int readCommandId() {
+        try {
+            return _row.getInt("__$command_id");
+        } catch (SQLException e) {
+            throw new DatastreamRuntimeException(e);
+        }
+    }
 }

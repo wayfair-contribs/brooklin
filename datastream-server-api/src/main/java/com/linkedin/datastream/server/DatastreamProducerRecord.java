@@ -14,6 +14,7 @@ import org.apache.commons.lang.Validate;
 
 import com.linkedin.datastream.common.BrooklinEnvelope;
 import com.linkedin.datastream.serde.SerDeSet;
+import org.checkerframework.checker.nullness.Opt;
 
 
 /**
@@ -31,13 +32,21 @@ public class DatastreamProducerRecord {
   // timestamp of when the record was sent to transport provider
   private Optional<Long> _eventsSendTimestamp = Optional.empty();
 
-  DatastreamProducerRecord(List<BrooklinEnvelope> events, Optional<Integer> partition, Optional<String> partitionKey,
-      String checkpoint, long eventsSourceTimestamp) {
-    this(events, partition, partitionKey, Optional.empty(), checkpoint, eventsSourceTimestamp);
-  }
+  // timestamp when the record was landed on db, used by CDC
+  private Optional<Long> _eventsProduceTimestamp = Optional.empty();
 
   DatastreamProducerRecord(List<BrooklinEnvelope> events, Optional<Integer> partition, Optional<String> partitionKey,
-      Optional<String> destination, String checkpoint, long eventsSourceTimestamp) {
+      String checkpoint, long eventsSourceTimestamp) {
+    this(events, partition, partitionKey, Optional.empty(), checkpoint, eventsSourceTimestamp, 0L);
+  }
+
+  DatastreamProducerRecord(List<BrooklinEnvelope> events,
+                           Optional<Integer> partition,
+                           Optional<String> partitionKey,
+                           Optional<String> destination,
+                           String checkpoint,
+                           long eventsSourceTimestamp,
+                           long eventsProduceTimestamp) {
     Validate.notNull(events, "null event");
     events.forEach((e) -> Validate.notNull(e, "null event"));
     Validate.isTrue(eventsSourceTimestamp > 0, "events source timestamp is invalid");
@@ -47,6 +56,7 @@ public class DatastreamProducerRecord {
     _partitionKey = partitionKey;
     _checkpoint = checkpoint;
     _eventsSourceTimestamp = eventsSourceTimestamp;
+    _eventsProduceTimestamp = Optional.of(eventsProduceTimestamp);
     _destination = destination;
   }
 
@@ -76,6 +86,10 @@ public class DatastreamProducerRecord {
    */
   public synchronized List<BrooklinEnvelope> getEvents() {
     return Collections.unmodifiableList(_events);
+  }
+
+  public Optional<Long> getEventsProduceTimestamp() {
+    return _eventsProduceTimestamp;
   }
 
   /**
@@ -149,4 +163,5 @@ public class DatastreamProducerRecord {
   public Optional<String> getDestination() {
     return _destination;
   }
+
 }

@@ -1,5 +1,7 @@
 package com.linkedin.datastream.connectors.jdbc.cdc;
 
+import com.linkedin.datastream.common.DatastreamException;
+import com.linkedin.datastream.common.DatastreamRuntimeException;
 import org.apache.avro.LogicalTypes;
 import org.apache.avro.Schema;
 import org.apache.avro.SchemaBuilder;
@@ -52,10 +54,8 @@ public class SchemaTranslator {
 
             return builder.endRecord();
         } catch (SQLException e) {
-            e.printStackTrace();
+            throw new DatastreamRuntimeException(e);
         }
-
-        return null;
     }
 
     private static void addSchemaForDataFields(String prefix, ResultSetMetaData meta, SchemaBuilder.FieldAssembler<Schema> builder)

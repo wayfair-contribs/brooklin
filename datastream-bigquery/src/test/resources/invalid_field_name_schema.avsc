@@ -1,0 +1,14 @@
+{
+  "type": "record",
+  "name": "invalid_field_names",
+  "namespace": "test",
+  "fields": [
+    {
+      "name": "42_invalid_names",
+      "type": [
+        "string"
+      ],
+      "default": ""
+    }
+  ]
+}

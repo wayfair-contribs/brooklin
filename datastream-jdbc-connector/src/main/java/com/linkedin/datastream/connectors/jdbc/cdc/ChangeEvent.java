@@ -2,6 +2,7 @@ package com.linkedin.datastream.connectors.jdbc.cdc;
 
 import com.linkedin.datastream.common.DatastreamRuntimeException;
 
+import javax.rmi.CORBA.Util;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Arrays;
@@ -13,6 +14,7 @@ public class ChangeEvent {
     private int op;
     private byte[] seqVal;
     private CDCCheckPoint checkpoint;
+    private int cmdId;
 
     private boolean isCompleted = false;
 
@@ -20,10 +22,11 @@ public class ChangeEvent {
     private Object[] dataBefore;
     private Object[] dataAfter;
 
-    public ChangeEvent(CDCCheckPoint checkpoint, byte[] sqlVal, int op, long txStartTime) {
+    public ChangeEvent(CDCCheckPoint checkpoint, byte[] sqlVal, int op, int cmdId, long txStartTime) {
         this.checkpoint = checkpoint;
         this.op = op;
         this.seqVal = sqlVal;
+        this.cmdId = cmdId;
         this.txStartTime = txStartTime;
     }
 
@@ -77,8 +80,9 @@ public class ChangeEvent {
         return "ChangeEvent{" +
                 "txStartTime=" + txStartTime +
                 ", op=" + op +
-                ", seqVal=" + Arrays.toString(seqVal) +
+                ", seqVal=" + Utils.bytesToHex(seqVal) +
                 ", checkpoint=" + checkpoint +
+                ", cmdId=" + cmdId +
                 ", isCompleted=" + isCompleted +
                 ", dataBefore=" + dataBefore +
                 ", dataAfter=" + dataAfter +

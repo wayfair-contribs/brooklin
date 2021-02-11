@@ -9,7 +9,6 @@ import com.linkedin.datastream.common.BrooklinEnvelope;
 import com.linkedin.datastream.common.BrooklinEnvelopeMetadataConstants;
 import com.linkedin.datastream.common.DatastreamRecordMetadata;
 import com.linkedin.datastream.common.DatastreamRuntimeException;
-import com.linkedin.datastream.metrics.DynamicMetricsManager;
 import com.linkedin.datastream.server.DatastreamEventProducer;
 import com.linkedin.datastream.server.DatastreamProducerRecord;
 import com.linkedin.datastream.server.DatastreamProducerRecordBuilder;
@@ -67,6 +66,9 @@ public class SQLServerCDCConnectorTask {
 
     // Cache of avro schema
     private Schema _avroSchema;
+
+    // Non-null pendingEvent means Connector received updateBefore only but has not got updateAfter
+    ChangeEvent _pendingEvent = null;
 
     private SQLServerCDCConnectorTask(SQLServerCDCConnectorTaskBuilder builder) {
         _datastreamName = builder._datastreamName;
@@ -210,8 +212,6 @@ public class SQLServerCDCConnectorTask {
             preparedStatement.setInt(3, _maxPollRows);
 
             preparedStatement.setFetchSize(_maxFetchSize);
-
-            LOG.info("===== Actual sql is {}", preparedStatement.toString());
         } catch (SQLException e) {
             LOG.error("Error in build CDC statement", e);
             throw new DatastreamRuntimeException("Error in build CDC statement", e);
@@ -231,37 +231,38 @@ public class SQLServerCDCConnectorTask {
 
         Schema avroSchema = getSchemaFromResultSet(resultSet);
 
-        // preEvent will have value when updateBefore has been received while updateAfter has not.
-        ChangeEvent preEvent = null;
         while (_rowReader.next(resultSet)) {
             long processStartTime = System.currentTimeMillis();
             resultSetSize++;
 
             // create checkpoint from current row and update committingCheckpoint after the row is
             // sent to TransportProvider
-            CDCCheckPoint checkpoint = createCheckpoint(resultSet);
+            CDCCheckPoint checkpoint = newCheckpointForRow(resultSet);
 
             // Create an event object for each change event
             // Each insert or delete has 1 event object.
             // Each update needs to merge 2 rows into one event object.
             int op = _rowReader.readOperation();
-            LOG.info("got event op = {}, seq = {}, cmdid = {}", op, Utils.bytesToHex(_rowReader.readSeqVal()), _rowReader.readCommandId() );
             ChangeEvent curEvent = null;
             if (op == 3) { // the row before update
                 // create a partial event
-                curEvent = buildEventWithUpdateBefore(resultSet, checkpoint);
+                curEvent = buildEventWithUpdateBefore(checkpoint);
             } else if (op == 4) { // the row after update
                 // complete event
-                curEvent = completeEventWithUpdateAfter(preEvent, resultSet, checkpoint);
+                curEvent = completeEventWithUpdateAfter(_pendingEvent, checkpoint);
             } else { // insert or delete
-                curEvent = buildEventWithInsertOrDelete(op, resultSet, checkpoint);
+                curEvent = buildEventWithInsertOrDelete(op, checkpoint);
+            }
+
+            if (LOG.isTraceEnabled()) {
+                LOG.trace("Got an event {}", curEvent);
             }
 
             if (!curEvent.isComplete()) { // This is update before, wait for next row.
-                preEvent = curEvent;
+                _pendingEvent = curEvent;
                 continue;
             } else {
-                preEvent = null;
+                _pendingEvent = null;
             }
 
             // Transform to Avro
@@ -294,21 +295,23 @@ public class SQLServerCDCConnectorTask {
             // Here the row has been sent to TP, update committingCheckpoint
             _committingCheckpoint = checkpoint;
         }
-
-        // Last row in this poll is updateBefore. Need to rewind committing checkpoint.
-        if (preEvent != null) {
-            LOG.info("Last event is not completed. Rewind checkpoint");
-            _resetToSafeCommit.set(true);
-        }
-
-        LOG.info("handled {} cdc events for captureInstance = {}. committing checkpoint is {}", resultSetSize, _table, _committingCheckpoint);
+        LOG.info("handled {} cdc events for captureInstance = {}. committing checkpoint is {}",
+                resultSetSize, _table, _committingCheckpoint);
     }
 
-    private CDCCheckPoint createCheckpoint(ResultSet row) {
+    private CDCCheckPoint newCheckpointForRow(ResultSet row) {
         try {
             byte[] lsn = row.getBytes(CDCQueryBuilder.LSN_INDEX);
-            int offset = Arrays.equals(lsn, _committingCheckpoint.lsnBytes())
-                    ? _committingCheckpoint.offset()+1 : 0;
+            int offset = 0;
+            if (Arrays.equals(lsn, _committingCheckpoint.lsnBytes())) {
+                // updateBefore row will not increment committingCheckpoint. So updateAfter row should increment by 2
+                offset = _pendingEvent == null ?
+                         _committingCheckpoint.offset()+1 :
+                         _committingCheckpoint.offset()+2;
+            } else if (_pendingEvent != null) {
+                // for first row in first poll where committingCheckpoint == minLSN
+                offset = 1;
+            }
             return new CDCCheckPoint(lsn, offset);
         } catch (SQLException e) {
             throw new DatastreamRuntimeException(e);
@@ -329,27 +332,33 @@ public class SQLServerCDCConnectorTask {
         }
     }
 
-    private ChangeEvent buildEventWithInsertOrDelete(int op, ResultSet row, CDCCheckPoint checkpoint) {
+    private ChangeEvent buildEventWithInsertOrDelete(int op, CDCCheckPoint checkpoint) {
         long txTs = _rowReader.readTransactionTime();
-        ChangeEvent event = new ChangeEvent(null, null, op, txTs);
-        return completeEventWithUpdateAfter(event, row, checkpoint);
+        int cmdId = _rowReader.readCommandId();
+        ChangeEvent event = new ChangeEvent(null, null, op, cmdId, txTs);
+        return completeEventWithUpdateAfter(event, checkpoint);
     }
 
-    private ChangeEvent buildEventWithUpdateBefore(ResultSet row, CDCCheckPoint checkpoint) {
-        LOG.info("buildEventWithUpdateBefore");
+    private ChangeEvent buildEventWithUpdateBefore(CDCCheckPoint checkpoint) {
         long txTs = _rowReader.readTransactionTime();
+        int cmdId = _rowReader.readCommandId();
         byte[] seqVal = _rowReader.readSeqVal();
         Object[] dataBefore = _rowReader.readDataColumns();
 
-        ChangeEvent event = new ChangeEvent(checkpoint, seqVal, 3, txTs);
+        ChangeEvent event = new ChangeEvent(checkpoint, seqVal, 3, cmdId, txTs);
         event.setUpdateBefore(dataBefore);
         return event;
     }
 
-    private ChangeEvent completeEventWithUpdateAfter(ChangeEvent preEvent, ResultSet row, CDCCheckPoint checkpoint) {
-        LOG.info("completeEventWithUpdateAfter");
+    private ChangeEvent completeEventWithUpdateAfter(ChangeEvent preEvent, CDCCheckPoint checkpoint) {
         byte[] seqVal = _rowReader.readSeqVal();
+        int cmdId = _rowReader.readCommandId();
         Object[] dataAfter = _rowReader.readDataColumns();
+
+        if (preEvent == null) {
+            LOG.warn("No updateBefore found. cmdId = {}, seqVal = {}", cmdId, seqVal);
+        }
+
         preEvent.completeUpdate(dataAfter, seqVal, checkpoint);
         return preEvent;
     }

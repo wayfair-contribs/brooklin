@@ -113,7 +113,8 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
                     try {
                         createOrUpdateTable(tableId, _destTableSchemas.get(destination),
                                 datastreamConfiguration.getSchemaEvolver(), datastreamConfiguration.getPartitionExpirationDays().orElse(null),
-                                datastreamConfiguration.getLabels(), datastreamConfiguration.isCreateDestinationTableEnabled());
+                                datastreamConfiguration.getLabels(), datastreamConfiguration.isCreateDestinationTableEnabled(),
+                                classSimpleName, recordMetadata.get(0).getTopic());
                         log.info("Initialized table {} for destination {}", tableId, destination);
                     } catch (final Exception e) {
                         log.warn("Unexpected error initializing table {} for destination {}", tableId, destination, e);
@@ -137,7 +138,8 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
                 try {
                     final boolean tableUpdatedOrCreated = createOrUpdateTable(tableId, _destTableSchemas.get(destination),
                             datastreamConfiguration.getSchemaEvolver(), datastreamConfiguration.getPartitionExpirationDays().orElse(null),
-                            datastreamConfiguration.getLabels(), datastreamConfiguration.isCreateDestinationTableEnabled());
+                            datastreamConfiguration.getLabels(), datastreamConfiguration.isCreateDestinationTableEnabled(),
+                            classSimpleName, recordMetadata.get(0).getTopic());
                     if (tableUpdatedOrCreated) {
                         log.info("Table created/updated for destination {}. Retrying batch...", destination);
                         insertErrors = insertRowsAndMapErrorsWithRetry(insertTableId, batch);
@@ -244,23 +246,46 @@ public class BigqueryBatchCommitter implements BatchCommitter<List<InsertAllRequ
     private boolean createOrUpdateTable(final TableId tableId, final Schema desiredTableSchema,
                                         final BigquerySchemaEvolver schemaEvolver, final Long partitionExpirationDays,
                                         final List<BigqueryLabel> labels,
-                                        final boolean createDestinationTableEnabled) {
+                                        final boolean createDestinationTableEnabled,
+                                        final String classSimpleName,
+                                        final String topic) {
         final TimePartitioning timePartitioning = Optional.ofNullable(partitionExpirationDays)
                 .filter(partitionRetentionDays -> partitionRetentionDays > 0)
                 .map(partitionRetentionDays -> TimePartitioning.of(TimePartitioning.Type.DAY, Duration.of(partitionRetentionDays, ChronoUnit.DAYS).toMillis()))
                 .orElse(TimePartitioning.of(TimePartitioning.Type.DAY));
 
         final Optional<Table> optionalExistingTable = Optional.ofNullable(_bigquery.getTable(tableId));
-        return optionalExistingTable.map(table -> updateTable(tableId, desiredTableSchema, timePartitioning, table, schemaEvolver, labels))
-                .orElseGet(() -> {
-                    final boolean tableCreated;
-                    if (createDestinationTableEnabled) {
-                        tableCreated = createTable(tableId, desiredTableSchema, timePartitioning, labels);
-                    } else {
-                        tableCreated = false;
+        final boolean tableCreatedOrUpdated;
+        if (optionalExistingTable.isPresent()) {
+            try {
+                tableCreatedOrUpdated = updateTable(tableId, desiredTableSchema, timePartitioning, optionalExistingTable.get(), schemaEvolver, labels);
+                if (tableCreatedOrUpdated) {
+                    log.info("Updated schema/labels on table {}", tableId);
+                    DynamicMetricsManager.getInstance().createOrUpdateMeter(classSimpleName, topic, "tableUpdateCount", 1);
+                }
+            } catch (final Exception e) {
+                log.error("Unexpected error while updating schema/labels on table {}", tableId, e);
+                DynamicMetricsManager.getInstance().createOrUpdateMeter(classSimpleName, topic, "tableUpdateErrorCount", 1);
+                throw e;
+            }
+        } else {
+            if (createDestinationTableEnabled) {
+                try {
+                    tableCreatedOrUpdated = createTable(tableId, desiredTableSchema, timePartitioning, labels);
+                    if (tableCreatedOrUpdated) {
+                        log.info("Created table {}", tableId);
+                        DynamicMetricsManager.getInstance().createOrUpdateMeter(classSimpleName, topic, "tableCreateCount", 1);
                     }
-                    return tableCreated;
-                });
+                } catch (final Exception e) {
+                    log.error("Unexpected error while creating table {}", tableId, e);
+                    DynamicMetricsManager.getInstance().createOrUpdateMeter(classSimpleName, topic, "tableCreateErrorCount", 1);
+                    throw e;
+                }
+            } else {
+                tableCreatedOrUpdated = false;
+            }
+        }
+        return tableCreatedOrUpdated;
     }
 
     private boolean updateTable(final TableId tableId, final Schema desiredTableSchema,

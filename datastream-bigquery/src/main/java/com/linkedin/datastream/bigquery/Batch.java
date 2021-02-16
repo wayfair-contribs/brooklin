@@ -5,13 +5,11 @@
  */
 package com.linkedin.datastream.bigquery;
 
-import java.nio.BufferUnderflowException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
 import org.apache.avro.generic.GenericRecord;
-import org.apache.kafka.common.errors.SerializationException;
 
 import com.google.cloud.bigquery.InsertAllRequest;
 import com.google.cloud.bigquery.Schema;
@@ -104,20 +102,20 @@ public class Batch extends AbstractBatch {
             final GenericRecord record;
             try {
                 record = (GenericRecord) _valueDeserializer.deserialize((byte[]) aPackage.getRecord().getValue());
-            } catch (SerializationException e) {
-                if (e.getCause() instanceof BufferUnderflowException) {
-                    LOG.warn("Error deserializing message at Topic {} - Partition {} - Offset {} - Reason {} - Exception {}",
-                            aPackage.getTopic(),
-                            aPackage.getPartition(),
-                            aPackage.getOffset(),
-                            e.getMessage(),
-                            e.getCause().getClass());
-                    DynamicMetricsManager.getInstance().createOrUpdateMeter(
-                            this.getClass().getSimpleName(),
-                            aPackage.getTopic(),
-                            "deserializerErrorCount",
-                            1);
-                }
+            } catch (Exception e) {
+                LOG.warn("Error deserializing message at Topic {} - Partition {} - Offset {} - Reason {} - Exception {} for destination {}",
+                        aPackage.getTopic(),
+                        aPackage.getPartition(),
+                        aPackage.getOffset(),
+                        e.getMessage(),
+                        e.getCause().getClass(),
+                        _destination,
+                        e);
+                DynamicMetricsManager.getInstance().createOrUpdateMeter(
+                        this.getClass().getSimpleName(),
+                        aPackage.getTopic(),
+                        "deserializerErrorCount",
+                        1);
                 throw e;
             }
 

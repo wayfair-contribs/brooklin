@@ -6,7 +6,6 @@
 package com.linkedin.datastream.server.diagnostics;
 
 
-import com.linkedin.datastream.common.DatastreamException;
 import java.util.Collection;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -15,6 +14,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.linkedin.datastream.common.Datastream;
+import com.linkedin.datastream.common.DatastreamException;
 import com.linkedin.datastream.diagnostics.ConnectorHealth;
 import com.linkedin.datastream.diagnostics.ConnectorHealthArray;
 import com.linkedin.datastream.diagnostics.ServerHealth;
@@ -123,12 +123,10 @@ public class ServerHealthResources extends SimpleResourceTemplate<ServerHealth> 
                   (KafkaCustomCheckpointProvider) _server.getCustomCheckpointProvider(task.getDatastreams().get(0));
           taskHealth.setSourceCheckpoint(kafkaCustomCheckpointProvider.getSafeCheckpoint().toString());
           kafkaCustomCheckpointProvider.close();
-        }
-        catch (DatastreamException e) {
+        } catch (DatastreamException e) {
           _errorLogger.logAndThrowRestLiServiceException(HttpStatus.S_400_BAD_REQUEST,
                   "Failed to get checkpoints." + task.getDatastreams().get(0), e);
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
           _errorLogger.logAndThrowRestLiServiceException(HttpStatus.S_500_INTERNAL_SERVER_ERROR,
                   "Failed to get checkpoints.", e);
         }

@@ -30,6 +30,7 @@ import com.codahale.metrics.CsvReporter;
 import com.codahale.metrics.MetricRegistry;
 import com.codahale.metrics.jmx.JmxReporter;
 
+import com.linkedin.datastream.common.Datastream;
 import com.linkedin.datastream.common.DatastreamException;
 import com.linkedin.datastream.common.DatastreamRuntimeException;
 import com.linkedin.datastream.common.ErrorLogger;
@@ -44,6 +45,7 @@ import com.linkedin.datastream.server.api.connector.Connector;
 import com.linkedin.datastream.server.api.connector.ConnectorFactory;
 import com.linkedin.datastream.server.api.connector.DatastreamDeduper;
 import com.linkedin.datastream.server.api.connector.DatastreamDeduperFactory;
+import com.linkedin.datastream.server.api.connector.DatastreamValidationException;
 import com.linkedin.datastream.server.api.serde.SerdeAdmin;
 import com.linkedin.datastream.server.api.serde.SerdeAdminFactory;
 import com.linkedin.datastream.server.api.strategy.AssignmentStrategy;
@@ -55,6 +57,8 @@ import com.linkedin.datastream.server.dms.DatastreamResourceFactory;
 import com.linkedin.datastream.server.dms.DatastreamResources;
 import com.linkedin.datastream.server.dms.DatastreamStore;
 import com.linkedin.datastream.server.dms.ZookeeperBackedDatastreamStore;
+import com.linkedin.datastream.server.providers.CustomCheckpointProvider;
+import com.linkedin.datastream.server.providers.KafkaCustomCheckpointProvider;
 
 import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.CONFIG_CONNECTOR_ASSIGNMENT_STRATEGY_FACTORY;
 import static com.linkedin.datastream.server.DatastreamServerConfigurationConstants.CONFIG_CONNECTOR_AUTHORIZER_NAME;
@@ -89,6 +93,8 @@ public class DatastreamServer {
   private static final Logger LOG = LoggerFactory.getLogger(DatastreamServer.class);
   private static final MetricRegistry METRIC_REGISTRY = new MetricRegistry();
   private static final List<BrooklinMetricInfo> METRIC_INFOS = new ArrayList<>();
+  private static final String CONFIG_CHECKPOINT_STORE_URL = "checkpointStoreURL";
+  private static final String CONFIG_CHECKPOINT_STORE_TOPIC = "checkpointStoreTopic";
 
   private final String _csvMetricsDir;
   private final Map<String, String> _bootstrapConnectors;
@@ -130,9 +136,9 @@ public class DatastreamServer {
    */
   public DatastreamServer(Properties properties) throws DatastreamException {
     _properties = properties;
-    LOG.info("Start to initialize DatastreamServer. Properties: " + properties);
+    LOG.info("Start to initialize DatastreamServer. Properties: " + _properties);
     LOG.info("Creating coordinator.");
-    VerifiableProperties verifiableProperties = new VerifiableProperties(properties);
+    VerifiableProperties verifiableProperties = new VerifiableProperties(_properties);
 
     HashSet<String> connectorTypes = new HashSet<>(verifiableProperties.getStringList(CONFIG_CONNECTOR_NAMES,
         Collections.emptyList()));
@@ -150,7 +156,7 @@ public class DatastreamServer {
       throw new DatastreamRuntimeException(errorMessage);
     }
 
-    CoordinatorConfig coordinatorConfig = new CoordinatorConfig(properties);
+    CoordinatorConfig coordinatorConfig = new CoordinatorConfig(_properties);
 
     LOG.info("Setting up DMS endpoint server.");
     ZkClient zkClient = new ZkClient(coordinatorConfig.getZkAddress(), coordinatorConfig.getZkSessionTimeout(),
@@ -236,8 +242,38 @@ public class DatastreamServer {
     return _serverComponentHealthAggregator;
   }
 
-  public Properties getProperties() {
-    return _properties;
+  /**
+   * Get instance of CustomCheckpointProvider
+   * @param datastream
+   * @return CustomCheckpointProvider
+   */
+  public CustomCheckpointProvider<Long> getCustomCheckpointProvider(Datastream datastream) throws DatastreamException {
+    if (datastream.getName().isEmpty()) {
+        String msg = "Datastream name is empty";
+        LOG.error(msg);
+        throw new DatastreamValidationException(msg);
+    }
+    if (datastream.getMetadata().get("incrementingColumnName").isEmpty()) {
+        String msg = "Datastream incrementingColumnName is empty";
+        LOG.error(msg);
+        throw new DatastreamValidationException(msg);
+    }
+    if (datastream.getMetadata().get("destinationTopic").isEmpty()) {
+        String msg = "Datastream destinationTopic is empty";
+        LOG.error(msg);
+        throw new DatastreamValidationException(msg);
+    }
+    VerifiableProperties verifiableProperties = new VerifiableProperties(_properties);
+    Properties connectorProperties = verifiableProperties.getDomainProperties(CONFIG_CONNECTOR_PREFIX + datastream.getConnectorName());
+    String checkpointStoreUrl = connectorProperties.getProperty(CONFIG_CHECKPOINT_STORE_URL);
+    String checkpointStoreTopic = connectorProperties.getProperty(CONFIG_CHECKPOINT_STORE_TOPIC);
+    String jdbcIdCheckpointId;
+    String idString =
+            datastream.getName() + " " + datastream.getMetadata().get("incrementingColumnName") + " " + datastream.getMetadata().get("destinationTopic");
+    long hash = idString.hashCode();
+    jdbcIdCheckpointId = String.valueOf(hash > 0 ? hash : -hash);
+    return new KafkaCustomCheckpointProvider(jdbcIdCheckpointId, checkpointStoreUrl, checkpointStoreTopic);
+
   }
 
   private void initializeSerde(String serdeName, Properties serdeConfig) {
@@ -477,5 +513,16 @@ public class DatastreamServer {
     }
 
     return props;
+  }
+
+  /**
+   * Check if connector name uses custom checkpointing
+   * @param connectorName
+   * @return
+   */
+  public boolean isCustomCheckpointing(String connectorName) {
+      VerifiableProperties verifiableProperties = new VerifiableProperties(_properties);
+      Properties connectorProperties = verifiableProperties.getDomainProperties(CONFIG_CONNECTOR_PREFIX + connectorName);
+      return Boolean.parseBoolean(connectorProperties.getProperty(CONFIG_CONNECTOR_CUSTOM_CHECKPOINTING, "false"));
   }
 }

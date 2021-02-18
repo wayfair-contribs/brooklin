@@ -13,6 +13,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.linkedin.datastream.common.Datastream;
+import com.linkedin.datastream.common.DatastreamException;
 import com.linkedin.datastream.diagnostics.ConnectorHealth;
 import com.linkedin.datastream.diagnostics.ConnectorHealthArray;
 import com.linkedin.datastream.diagnostics.ServerHealth;
@@ -21,6 +22,10 @@ import com.linkedin.datastream.diagnostics.TaskHealthArray;
 import com.linkedin.datastream.server.Coordinator;
 import com.linkedin.datastream.server.DatastreamServer;
 import com.linkedin.datastream.server.DatastreamTask;
+import com.linkedin.datastream.server.ErrorLogger;
+import com.linkedin.datastream.server.dms.DatastreamSourceCheckpointResources;
+import com.linkedin.datastream.server.providers.CustomCheckpointProvider;
+import com.linkedin.restli.common.HttpStatus;
 import com.linkedin.restli.server.annotations.RestLiSimpleResource;
 import com.linkedin.restli.server.resources.SimpleResourceTemplate;
 
@@ -35,6 +40,8 @@ public class ServerHealthResources extends SimpleResourceTemplate<ServerHealth> 
 
   private final DatastreamServer _server;
   private final Coordinator _coordinator;
+  private final DatastreamSourceCheckpointResources _checkpointResources;
+  private final ErrorLogger _errorLogger;
 
   /**
    * Construct an instance of ServerHealthResources
@@ -43,6 +50,9 @@ public class ServerHealthResources extends SimpleResourceTemplate<ServerHealth> 
   public ServerHealthResources(DatastreamServer datastreamServer) {
     _server = datastreamServer;
     _coordinator = datastreamServer.getCoordinator();
+    _checkpointResources = new DatastreamSourceCheckpointResources(datastreamServer);
+    _errorLogger = new ErrorLogger(LOG, _coordinator.getInstanceName());
+
   }
 
   @Override
@@ -106,7 +116,25 @@ public class ServerHealthResources extends SimpleResourceTemplate<ServerHealth> 
 
       taskHealth.setName(task.getDatastreamTaskName());
       taskHealth.setPartitions(task.getPartitions().toString());
-      taskHealth.setSourceCheckpoint(task.getCheckpoints().toString());
+      if (_server.isCustomCheckpointing(connectorType)) {
+        CustomCheckpointProvider<Long> customCheckpointProvider = null;
+        try {
+          customCheckpointProvider = _server.getCustomCheckpointProvider(task.getDatastreams().get(0));
+          taskHealth.setSourceCheckpoint(customCheckpointProvider.getSafeCheckpoint().toString());
+        } catch (DatastreamException e) {
+          _errorLogger.logAndThrowRestLiServiceException(HttpStatus.S_400_BAD_REQUEST,
+                  "Failed to get checkpoints." + task.getDatastreams().get(0), e);
+        } catch (Exception e) {
+          _errorLogger.logAndThrowRestLiServiceException(HttpStatus.S_500_INTERNAL_SERVER_ERROR,
+                  "Failed to get checkpoints.", e);
+        } finally {
+          if (customCheckpointProvider != null) {
+            customCheckpointProvider.close();
+          }
+        }
+      } else {
+        taskHealth.setSourceCheckpoint(task.getCheckpoints().toString());
+      }
       allTasksHealth.add(taskHealth);
     });
 

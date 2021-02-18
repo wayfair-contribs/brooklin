@@ -87,6 +87,65 @@
       "doc" : "Generic metadata for Datastream (e.g. owner, expiration, etc). Metadata is stored as user defined name/value pair.",
       "optional" : true
     } ]
+  }, {
+    "type" : "record",
+    "name" : "TaskHealth",
+    "namespace" : "com.linkedin.datastream.diagnostics",
+    "doc" : "Datastream task health",
+    "fields" : [ {
+      "name" : "name",
+      "type" : "string",
+      "doc" : "name of the task."
+    }, {
+      "name" : "datastreams",
+      "type" : "string",
+      "doc" : "Name of the datastreams associated with the task."
+    }, {
+      "name" : "partitions",
+      "type" : "string",
+      "doc" : "Partitions associated with the task."
+    }, {
+      "name" : "source",
+      "type" : "string",
+      "doc" : "Source of the datastream."
+    }, {
+      "name" : "destination",
+      "type" : "string",
+      "doc" : "Destination of the datastream."
+    }, {
+      "name" : "statusCode",
+      "type" : "string",
+      "doc" : "Status code of the datastream task."
+    }, {
+      "name" : "statusMessage",
+      "type" : "string",
+      "doc" : "Status message of the datastream task."
+    }, {
+      "name" : "sourceCheckpoint",
+      "type" : "string",
+      "doc" : "Source checkpoint."
+    } ]
+  }, {
+    "type" : "record",
+    "name" : "ConnectorHealth",
+    "namespace" : "com.linkedin.datastream.diagnostics",
+    "doc" : "Datastream connector health",
+    "fields" : [ {
+      "name" : "connectorName",
+      "type" : "string",
+      "doc" : "name of the connector."
+    }, {
+      "name" : "strategy",
+      "type" : "string",
+      "doc" : "Strategy used by the connector."
+    }, {
+      "name" : "tasks",
+      "type" : {
+        "type" : "array",
+        "items" : "TaskHealth"
+      },
+      "doc" : "tasks assigned to the connector Instance."
+    } ]
   } ],
   "schema" : {
     "name" : "datastream",
@@ -183,6 +242,26 @@
             "default" : "false",
             "doc" : "whether or not to resume all datastreams within the given datastream's group"
           } ]
+        } ],
+        "subresources" : [ {
+          "name" : "checkpoint",
+          "namespace" : "com.linkedin.datastream.server.dms",
+          "path" : "/datastream/{datastreamId}/checkpoint",
+          "schema" : "com.linkedin.datastream.diagnostics.ConnectorHealth",
+          "doc" : "The Restli resource of {@link ConnectorHealth}. Used for collecting datastream checkpoint info\n about a {@link Datastream}.\n\ngenerated from: com.linkedin.datastream.server.dms.DatastreamSourceCheckpointResources",
+          "simple" : {
+            "supports" : [ "get", "update" ],
+            "methods" : [ {
+              "method" : "get",
+              "doc" : "Get source checkpoints of the parent datastream for each tasks"
+            }, {
+              "method" : "update",
+              "doc" : "Update source checkpoint on a given datastream"
+            } ],
+            "entity" : {
+              "path" : "/datastream/{datastreamId}/checkpoint"
+            }
+          }
         } ]
       }
     }

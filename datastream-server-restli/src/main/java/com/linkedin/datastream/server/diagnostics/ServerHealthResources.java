@@ -5,7 +5,6 @@
  */
 package com.linkedin.datastream.server.diagnostics;
 
-
 import java.util.Collection;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -25,7 +24,7 @@ import com.linkedin.datastream.server.DatastreamServer;
 import com.linkedin.datastream.server.DatastreamTask;
 import com.linkedin.datastream.server.ErrorLogger;
 import com.linkedin.datastream.server.dms.DatastreamSourceCheckpointResources;
-import com.linkedin.datastream.server.providers.KafkaCustomCheckpointProvider;
+import com.linkedin.datastream.server.providers.CustomCheckpointProvider;
 import com.linkedin.restli.common.HttpStatus;
 import com.linkedin.restli.server.annotations.RestLiSimpleResource;
 import com.linkedin.restli.server.resources.SimpleResourceTemplate;
@@ -118,17 +117,20 @@ public class ServerHealthResources extends SimpleResourceTemplate<ServerHealth> 
       taskHealth.setName(task.getDatastreamTaskName());
       taskHealth.setPartitions(task.getPartitions().toString());
       if (_server.isCustomCheckpointing(connectorType)) {
+        CustomCheckpointProvider<Long> customCheckpointProvider = null;
         try {
-          KafkaCustomCheckpointProvider kafkaCustomCheckpointProvider =
-                  (KafkaCustomCheckpointProvider) _server.getCustomCheckpointProvider(task.getDatastreams().get(0));
-          taskHealth.setSourceCheckpoint(kafkaCustomCheckpointProvider.getSafeCheckpoint().toString());
-          kafkaCustomCheckpointProvider.close();
+          customCheckpointProvider = _server.getCustomCheckpointProvider(task.getDatastreams().get(0));
+          taskHealth.setSourceCheckpoint(customCheckpointProvider.getSafeCheckpoint().toString());
         } catch (DatastreamException e) {
           _errorLogger.logAndThrowRestLiServiceException(HttpStatus.S_400_BAD_REQUEST,
                   "Failed to get checkpoints." + task.getDatastreams().get(0), e);
         } catch (Exception e) {
           _errorLogger.logAndThrowRestLiServiceException(HttpStatus.S_500_INTERNAL_SERVER_ERROR,
                   "Failed to get checkpoints.", e);
+        } finally {
+          if (customCheckpointProvider != null) {
+            customCheckpointProvider.close();
+          }
         }
       } else {
         taskHealth.setSourceCheckpoint(task.getCheckpoints().toString());

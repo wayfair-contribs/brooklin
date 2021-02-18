@@ -5,6 +5,7 @@
  */
 package com.linkedin.datastream.server.dms;
 
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -16,7 +17,7 @@ import com.linkedin.datastream.diagnostics.TaskHealthArray;
 import com.linkedin.datastream.server.Coordinator;
 import com.linkedin.datastream.server.DatastreamServer;
 import com.linkedin.datastream.server.ErrorLogger;
-import com.linkedin.datastream.server.providers.KafkaCustomCheckpointProvider;
+import com.linkedin.datastream.server.providers.CustomCheckpointProvider;
 import com.linkedin.restli.common.HttpStatus;
 import com.linkedin.restli.server.UpdateResponse;
 import com.linkedin.restli.server.annotations.RestLiSimpleResource;
@@ -94,15 +95,19 @@ public class DatastreamSourceCheckpointResources extends SimpleResourceTemplate<
             _errorLogger.logAndThrowRestLiServiceException(HttpStatus.S_405_METHOD_NOT_ALLOWED,
                     "Datastream must be in PAUSED state before updating checkpoint");
         }
+        CustomCheckpointProvider<Long> customCheckpointProvider = null;
         try {
             // Sample SourceCheckpoint resource {"tasks":["sourceCheckpoint":"1234"]}
             final long newCheckpoint = Long.parseLong(input.getTasks().get(0).getSourceCheckpoint());
-            KafkaCustomCheckpointProvider kafkaCustomCheckpointProvider = (KafkaCustomCheckpointProvider) _server.getCustomCheckpointProvider(datastream);
-            kafkaCustomCheckpointProvider.rewindTo(newCheckpoint);
-            kafkaCustomCheckpointProvider.close();
+            customCheckpointProvider = _server.getCustomCheckpointProvider(datastream);
+            customCheckpointProvider.rewindTo(newCheckpoint);
         } catch (Exception e) {
             _errorLogger.logAndThrowRestLiServiceException(HttpStatus.S_400_BAD_REQUEST,
                     "Could not complete datastream checkpoint update.", e);
+        } finally {
+            if (customCheckpointProvider != null) {
+                customCheckpointProvider.close();
+            }
         }
         return new UpdateResponse(HttpStatus.S_200_OK);
     }
@@ -121,13 +126,16 @@ public class DatastreamSourceCheckpointResources extends SimpleResourceTemplate<
             TaskHealth taskHealth = new TaskHealth();
             taskHealth.setName(task.getDatastreamTaskName());
             if (_server.isCustomCheckpointing(datastream.getConnectorName())) {
+                CustomCheckpointProvider<Long> customCheckpointProvider = null;
                 try {
-                    KafkaCustomCheckpointProvider kafkaCustomCheckpointProvider =
-                            (KafkaCustomCheckpointProvider) _server.getCustomCheckpointProvider(task.getDatastreams().get(0));
-                    taskHealth.setSourceCheckpoint(kafkaCustomCheckpointProvider.getSafeCheckpoint().toString());
-                    kafkaCustomCheckpointProvider.close();
+                    customCheckpointProvider = _server.getCustomCheckpointProvider(task.getDatastreams().get(0));
+                    taskHealth.setSourceCheckpoint(customCheckpointProvider.getSafeCheckpoint().toString());
                 } catch (Exception e) {
                     e.printStackTrace();
+                } finally {
+                    if (customCheckpointProvider != null) {
+                        customCheckpointProvider.close();
+                    }
                 }
             } else {
                 taskHealth.setSourceCheckpoint(task.getCheckpoints().toString());

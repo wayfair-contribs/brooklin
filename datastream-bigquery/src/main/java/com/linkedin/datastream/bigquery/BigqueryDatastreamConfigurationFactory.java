@@ -7,6 +7,7 @@
 package com.linkedin.datastream.bigquery;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -45,6 +46,7 @@ public class BigqueryDatastreamConfigurationFactory {
      * @param deadLetterTableConfiguration a BigqueryDatastreamConfiguration for the dead letter table associated with this Datastream
      * @param labels a List of BigqueryLabel to set on the destination table
      * @param schemaId an optional Integer for a fixed schema id
+     * @param relaxedAvroSchemaValidation an optional Boolean to control relaxed Avro schema validation for this Datastream
      * @return the BigqueryDatastreamConfiguration
      */
     public BigqueryDatastreamConfiguration createBigqueryDatastreamConfiguration(
@@ -56,10 +58,23 @@ public class BigqueryDatastreamConfigurationFactory {
             final Long partitionExpirationDays,
             final BigqueryDatastreamConfiguration deadLetterTableConfiguration,
             final List<BigqueryLabel> labels,
-            final Integer schemaId) {
+            final Integer schemaId,
+            final Boolean relaxedAvroSchemaValidation) {
+
+        // If relaxed Avro schema validation is defined, then explicitly enable/disable validations via config, otherwise use validation defaults
+        final Map<String, ?> schemaRegistryConfig = Optional.ofNullable(relaxedAvroSchemaValidation)
+                // Convert relaxedAvroSchemaValidation boolean to enableValidation boolean
+                .map(b -> !b)
+                .map(enableValidation -> {
+                    final Map<String, Object> config = new HashMap<>(2);
+                    config.put(BigquerySchemaRegistryClientConfig.SCHEMA_REGISTRY_PARSER_VALIDATE_FIELD_NAMES, enableValidation);
+                    config.put(BigquerySchemaRegistryClientConfig.SCHEMA_REGISTRY_PARSER_VALIDATE_DEFAULTS, enableValidation);
+                    return Collections.unmodifiableMap(config);
+                }).orElse(Collections.emptyMap());
         final SchemaRegistryClient schemaRegistryClient = new BigqueryCachedSchemaRegistryClient(
                 schemaRegistryLocation,
-                AbstractKafkaAvroSerDeConfig.MAX_SCHEMAS_PER_SUBJECT_DEFAULT
+                AbstractKafkaAvroSerDeConfig.MAX_SCHEMAS_PER_SUBJECT_DEFAULT,
+                schemaRegistryConfig
         );
 
         final Map<String, Object> valueSerDeConfig = new HashMap<>();

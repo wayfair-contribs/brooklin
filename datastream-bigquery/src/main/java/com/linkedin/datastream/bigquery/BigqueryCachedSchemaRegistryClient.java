@@ -49,8 +49,8 @@ public class BigqueryCachedSchemaRegistryClient implements SchemaRegistryClient 
     private final Map<String, Map<Schema, Integer>> schemaCache;
     private final Map<String, Map<Integer, Schema>> idCache;
     private final Map<String, Map<Schema, Integer>> versionCache;
-    private final boolean validateSchemaDefaults;
-    private final boolean validateSchemaFieldNames;
+    private final Boolean validateSchemaDefaults;
+    private final Boolean validateSchemaFieldNames;
 
     public static final Map<String, String> DEFAULT_REQUEST_PROPERTIES;
 
@@ -178,9 +178,9 @@ public class BigqueryCachedSchemaRegistryClient implements SchemaRegistryClient 
 
         final Optional<Map<String, ?>> optionalConfigs = Optional.ofNullable(configs);
         validateSchemaFieldNames = optionalConfigs.map(c -> c.get(BigquerySchemaRegistryClientConfig.SCHEMA_REGISTRY_PARSER_VALIDATE_FIELD_NAMES))
-                .map(v -> Boolean.valueOf(v.toString())).orElse(false);
+                .map(v -> Boolean.valueOf(v.toString())).orElse(null);
         validateSchemaDefaults = optionalConfigs.map(c -> c.get(BigquerySchemaRegistryClientConfig.SCHEMA_REGISTRY_PARSER_VALIDATE_DEFAULTS))
-                .map(v -> Boolean.valueOf(v.toString())).orElse(false);
+                .map(v -> Boolean.valueOf(v.toString())).orElse(null);
     }
 
     private void configureRestService(Map<String, ?> configs, Map<String, String> httpHeaders) {
@@ -234,9 +234,14 @@ public class BigqueryCachedSchemaRegistryClient implements SchemaRegistryClient 
         return restService.registerSchema(schema.toString(), subject, version, id);
     }
 
-    private Schema getSchemaByIdFromRegistry(int id) throws IOException, RestClientException {
-        SchemaString restSchema = restService.getId(id);
-        return new Schema.Parser().setValidate(validateSchemaFieldNames).setValidateDefaults(validateSchemaDefaults).parse(restSchema.getSchemaString());
+    private Schema getSchemaByIdFromRegistry(final int id) throws IOException, RestClientException {
+        final SchemaString restSchema = restService.getId(id);
+
+        final Schema.Parser parser = new Schema.Parser();
+        Optional.ofNullable(validateSchemaFieldNames).ifPresent(parser::setValidate);
+        Optional.ofNullable(validateSchemaDefaults).ifPresent(parser::setValidateDefaults);
+
+        return parser.parse(restSchema.getSchemaString());
     }
 
     private int getVersionFromRegistry(String subject, Schema schema)

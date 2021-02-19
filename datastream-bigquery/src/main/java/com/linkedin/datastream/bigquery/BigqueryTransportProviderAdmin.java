@@ -54,6 +54,7 @@ public class BigqueryTransportProviderAdmin implements TransportProviderAdmin {
     protected static final String METADATA_LABELS_KEY = "labels";
     protected static final String METADATA_SCHEMA_REGISTRY_LOCATION_KEY = "schemaRegistryLocation";
     protected static final String METADATA_SCHEMA_ID_KEY = "schemaID";
+    protected static final String METADATA_RELAX_AVRO_SCHEMA_VALIDATION = "relaxAvroSchemaValidation";
 
     private static final int DEFAULT_NUMBER_PARTITIONS = 1;
 
@@ -233,11 +234,16 @@ public class BigqueryTransportProviderAdmin implements TransportProviderAdmin {
                 null,
                 null,
                 null,
+                null,
                 null
         );
+
         final List<BigqueryLabel> labels = Optional.ofNullable(metadata.get(METADATA_LABELS_KEY))
                 .map(this::parseLabelsString).orElse(null);
-        final Integer schemaId = Optional.ofNullable(metadata.get(METADATA_SCHEMA_ID_KEY)).map(Integer::valueOf).orElse(null);
+        final Integer schemaId = Optional.ofNullable(metadata.get(METADATA_SCHEMA_ID_KEY))
+                .map(Integer::valueOf).orElse(null);
+        final Boolean relaxAvroSchemaValidation = Optional.ofNullable(metadata.get(METADATA_RELAX_AVRO_SCHEMA_VALIDATION))
+                .map(Boolean::valueOf).orElse(null);
 
         return _bigqueryDatastreamConfigurationFactory.createBigqueryDatastreamConfiguration(
                 destination,
@@ -248,7 +254,8 @@ public class BigqueryTransportProviderAdmin implements TransportProviderAdmin {
                 partitionExpirationDays,
                 deadLetterTableConfiguration,
                 labels,
-                schemaId
+                schemaId,
+                relaxAvroSchemaValidation
                 );
     }
 

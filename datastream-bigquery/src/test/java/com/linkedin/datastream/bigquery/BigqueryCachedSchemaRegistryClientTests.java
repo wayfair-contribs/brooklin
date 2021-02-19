@@ -24,13 +24,52 @@ import io.confluent.kafka.schemaregistry.client.rest.exceptions.RestClientExcept
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.assertTrue;
+import static org.testng.FileAssert.fail;
 
 public class BigqueryCachedSchemaRegistryClientTests {
 
     @Test
-    public void testParseSchemasWithoutValidation() throws IOException, RestClientException {
+    public void testParseSchemasWithDefaultConfigs() throws IOException, RestClientException {
         final RestService restService = mock(RestService.class);
         final BigqueryCachedSchemaRegistryClient srClient = new BigqueryCachedSchemaRegistryClient(restService, 2);
+
+        final int invalidDefaultsSchemaId = 1;
+        String invalidDefaultsSchemaString;
+        try (final InputStream avroFileInputStream = getClass().getClassLoader().getResourceAsStream("invalid_defaults_schema.avsc")) {
+            invalidDefaultsSchemaString = Files.readFile(avroFileInputStream);
+        }
+        when(restService.getId(invalidDefaultsSchemaId)).thenReturn(new SchemaString(invalidDefaultsSchemaString));
+
+        final int invalidFieldNamesSchemaId = 2;
+        String invalidFieldNamesSchemaString;
+        try (final InputStream avroFileInputStream = getClass().getClassLoader().getResourceAsStream("invalid_field_name_schema.avsc")) {
+            invalidFieldNamesSchemaString = Files.readFile(avroFileInputStream);
+        }
+        when(restService.getId(invalidFieldNamesSchemaId)).thenReturn(new SchemaString(invalidFieldNamesSchemaString));
+
+        try {
+            srClient.getById(invalidDefaultsSchemaId);
+            fail();
+        } catch (final AvroTypeException e) {
+            assertTrue(e.getMessage().startsWith("Invalid default for field "));
+        }
+        try {
+            srClient.getByID(invalidFieldNamesSchemaId);
+            fail();
+        } catch (final SchemaParseException e) {
+            assertTrue(e.getMessage().startsWith("Illegal initial character: "));
+        }
+    }
+
+    @Test
+    public void testParseSchemasWithoutValidation() throws IOException, RestClientException {
+        final RestService restService = mock(RestService.class);
+        final BigqueryCachedSchemaRegistryClient srClient = new BigqueryCachedSchemaRegistryClient(restService, 2,
+                ImmutableMap.of(
+                        BigquerySchemaRegistryClientConfig.SCHEMA_REGISTRY_PARSER_VALIDATE_DEFAULTS, false,
+                        BigquerySchemaRegistryClientConfig.SCHEMA_REGISTRY_PARSER_VALIDATE_FIELD_NAMES, false
+                ));
         final Schema.Parser parser = new Schema.Parser().setValidate(false).setValidateDefaults(false);
 
         final int invalidDefaultsSchemaId = 1;
@@ -54,7 +93,10 @@ public class BigqueryCachedSchemaRegistryClientTests {
     @Test
     public void testParseSchemaWithInvalidDefaultsValidationDisabled() throws IOException, RestClientException {
         final RestService restService = mock(RestService.class);
-        final BigqueryCachedSchemaRegistryClient srClient = new BigqueryCachedSchemaRegistryClient(restService, 1);
+        final BigqueryCachedSchemaRegistryClient srClient = new BigqueryCachedSchemaRegistryClient(restService, 1,
+                ImmutableMap.of(
+                        BigquerySchemaRegistryClientConfig.SCHEMA_REGISTRY_PARSER_VALIDATE_DEFAULTS, false
+                ));
         final int schemaId = 12345;
         String schemaString;
         try (final InputStream avroFileInputStream = getClass().getClassLoader().getResourceAsStream("invalid_defaults_schema.avsc")) {
@@ -85,7 +127,10 @@ public class BigqueryCachedSchemaRegistryClientTests {
     @Test
     public void testParseSchemaWithInvalidFieldNamesValidationDisabled() throws IOException, RestClientException {
         final RestService restService = mock(RestService.class);
-        final BigqueryCachedSchemaRegistryClient srClient = new BigqueryCachedSchemaRegistryClient(restService, 1);
+        final BigqueryCachedSchemaRegistryClient srClient = new BigqueryCachedSchemaRegistryClient(restService, 1,
+                ImmutableMap.of(
+                        BigquerySchemaRegistryClientConfig.SCHEMA_REGISTRY_PARSER_VALIDATE_FIELD_NAMES, false
+                ));
         final int schemaId = 12345;
         String schemaString;
         try (final InputStream avroFileInputStream = getClass().getClassLoader().getResourceAsStream("invalid_field_name_schema.avsc")) {

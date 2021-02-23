@@ -9,10 +9,11 @@ import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.stream.Collectors;
 
 import org.apache.avro.Schema;
@@ -70,8 +71,8 @@ public class BigqueryTransportProvider implements TransportProvider {
     private final Serializer _valueSerializer;
     private final Deserializer _valueDeserializer;
     private final BigqueryDatastreamConfiguration _datastreamConfiguration;
-    private final Map<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> _destinationConfigurations;
-    private final Set<BigqueryDatastreamDestination> _destinations;
+    private final ConcurrentMap<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> _destinationConfigurations;
+    private final ConcurrentHashMap.KeySetView<BigqueryDatastreamDestination, Boolean> _destinations;
 
     /**
      * Constructor.
@@ -85,13 +86,13 @@ public class BigqueryTransportProvider implements TransportProvider {
                                      final Serializer valueSerializer,
                                      final Deserializer valueDeserializer,
                                      final BigqueryDatastreamConfiguration datastreamConfiguration,
-                                     final Map<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> destinationConfigurations) {
+                                     final ConcurrentMap<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> destinationConfigurations) {
         _bufferedTransportProvider = bufferedTransportProvider;
         _valueSerializer = valueSerializer;
         _valueDeserializer = valueDeserializer;
         _datastreamConfiguration = datastreamConfiguration;
         _destinationConfigurations = destinationConfigurations;
-        _destinations = new HashSet<>();
+        _destinations = ConcurrentHashMap.newKeySet();
     }
 
     @Override
@@ -162,9 +163,8 @@ public class BigqueryTransportProvider implements TransportProvider {
     }
 
     private void registerConfigurationForDestination(final BigqueryDatastreamDestination destination, final BigqueryDatastreamConfiguration configuration) {
-        if (_destinations.add(destination)) {
-            _destinationConfigurations.put(destination, configuration);
-        }
+        _destinations.add(destination);
+        _destinationConfigurations.put(destination, configuration);
     }
 
     Set<BigqueryDatastreamDestination> getDestinations() {

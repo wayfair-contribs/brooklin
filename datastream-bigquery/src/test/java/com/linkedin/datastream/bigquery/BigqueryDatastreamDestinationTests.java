@@ -6,10 +6,12 @@
 package com.linkedin.datastream.bigquery;
 
 import java.net.URI;
+import java.util.Objects;
 
 import org.testng.annotations.Test;
 
 import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.assertTrue;
 
 public class BigqueryDatastreamDestinationTests {
 
@@ -36,6 +38,30 @@ public class BigqueryDatastreamDestinationTests {
                 BigqueryDatastreamDestination.parse("brooklin-bigquery://project_name.dataset.test.topic.with.period"),
                 destination
         );
+    }
+
+    @Test
+    public void testEquals() {
+        final String project = "project";
+        final String dataset = "dataset";
+        final String destinationName = "destination";
+        final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination(project, dataset, destinationName);
+        final String url = destination.toString();
+
+        assertEquals(new BigqueryDatastreamDestination(project, dataset, destinationName), destination);
+        assertEquals(BigqueryDatastreamDestination.parse(url), destination);
+    }
+
+    @Test
+    public void testHashCode() {
+        final String project = "project";
+        final String dataset = "dataset";
+        final String destinationName = "destination";
+        final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination(project, dataset, destinationName);
+        final String url = destination.toString();
+
+        assertEquals(new BigqueryDatastreamDestination(project, dataset, destinationName).hashCode(), destination.hashCode());
+        assertEquals(BigqueryDatastreamDestination.parse(url).hashCode(), destination.hashCode());
     }
 
 }

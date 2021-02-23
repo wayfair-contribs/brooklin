@@ -12,15 +12,24 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import org.apache.avro.Schema;
+import org.mockito.Mockito;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
 
 import com.linkedin.data.template.StringMap;
 import com.linkedin.datastream.bigquery.schema.BigquerySchemaEvolver;
@@ -41,6 +50,7 @@ import static com.linkedin.datastream.bigquery.BigqueryTransportProviderAdmin.ME
 import static com.linkedin.datastream.bigquery.BigqueryTransportProviderAdmin.METADATA_SCHEMA_ID_KEY;
 import static com.linkedin.datastream.bigquery.BigqueryTransportProviderAdmin.METADATA_SCHEMA_REGISTRY_LOCATION_KEY;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.testng.Assert.assertEquals;
@@ -58,7 +68,7 @@ public class BigqueryTransportProviderAdminTests {
     private String defaultProjectId;
     private String defaultSchemaRegistryUrl;
     private BigquerySchemaEvolver defaultSchemaEvolver;
-    private Map<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> datastreamConfigByDestination;
+    private ConcurrentMap<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> datastreamConfigByDestination;
     private Map<String, BigquerySchemaEvolver> bigquerySchemaEvolverMap;
     private BigqueryTransportProviderFactory bigqueryTransportProviderFactory;
     private BigqueryDatastreamConfigurationFactory bigqueryDatastreamConfigurationFactory;
@@ -71,7 +81,7 @@ public class BigqueryTransportProviderAdminTests {
         defaultProjectId = "projectId";
         defaultSchemaRegistryUrl = "https://schema-registry";
         defaultSchemaEvolver = BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.dynamic);
-        datastreamConfigByDestination = new HashMap<>();
+        datastreamConfigByDestination = new ConcurrentHashMap<>();
         bigquerySchemaEvolverMap = Arrays.stream(BigquerySchemaEvolverType.values())
                 .collect(Collectors.toMap(BigquerySchemaEvolverType::getModeName, BigquerySchemaEvolverFactory::createBigquerySchemaEvolver));
         bigqueryTransportProviderFactory = mock(BigqueryTransportProviderFactory.class);
@@ -168,6 +178,7 @@ public class BigqueryTransportProviderAdminTests {
         )).thenReturn(bigqueryTransportProvider);
 
         final TransportProvider transportProvider = admin.assignTransportProvider(task);
+        datastreamConfigByDestination.put(destination, config);
 
         assertEquals(transportProvider, bigqueryTransportProvider);
         assertEquals(admin.getDatastreamTransportProviders().get(datastream), transportProvider);
@@ -178,8 +189,127 @@ public class BigqueryTransportProviderAdminTests {
         assertFalse(admin.getDatastreamTransportProviders().containsKey(datastream));
         assertFalse(admin.getTransportProviderTasks().containsKey(transportProvider));
         verify(bigqueryTransportProvider).close();
-        verify(bigqueryTransportProvider).getDestinations();
-        assertTrue(datastreamConfigByDestination.isEmpty());
+        assertEquals(datastreamConfigByDestination.size(), 1);
+    }
+
+    @Test
+    public void testParallelAssignAndUnassign() {
+        final BigqueryTransportProviderAdmin admin = new BigqueryTransportProviderAdmin(
+                bufferedTransportProvider,
+                defaultSchemaEvolver,
+                datastreamConfigByDestination,
+                bigquerySchemaEvolverMap,
+                bigqueryTransportProviderFactory,
+                bigqueryDatastreamConfigurationFactory,
+                defaultProjectId,
+                defaultSchemaRegistryUrl
+        );
+        final String datastreamName = "test";
+        final String schemaRegistryLocation = "https://schema-registry";
+        final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination("project", "dataset", "table");
+        final Datastream datastream = DatastreamTestUtils.createDatastream("connector", datastreamName, "source", destination.toString(), 1);
+        datastream.getMetadata().put(METADATA_SCHEMA_REGISTRY_LOCATION_KEY, schemaRegistryLocation);
+        final BigqueryDatastreamConfiguration config = BigqueryDatastreamConfiguration.builder(
+                destination,
+                defaultSchemaEvolver,
+                true,
+                deserializer,
+                serializer
+        ).build();
+        when(bigqueryDatastreamConfigurationFactory.createBigqueryDatastreamConfiguration(
+                destination,
+                datastreamName,
+                schemaRegistryLocation,
+                config.getSchemaEvolver(),
+                config.isCreateDestinationTableEnabled(),
+                null,
+                null,
+                null,
+                null
+        )).thenReturn(config);
+        final BigqueryTransportProvider bigqueryTransportProvider = mock(BigqueryTransportProvider.class);
+
+        when(bigqueryTransportProviderFactory.createTransportProvider(bufferedTransportProvider, serializer, deserializer, config, datastreamConfigByDestination
+        )).thenReturn(bigqueryTransportProvider);
+        when(bigqueryTransportProvider.getDestinations()).thenReturn(ImmutableSet.of(destination));
+
+        final DatastreamTask task = new DatastreamTaskImpl(Collections.singletonList(datastream));
+
+        admin.assignTransportProvider(task);
+
+        final ExecutorService executor = Executors.newCachedThreadPool();
+
+        final List<Future<?>> results = IntStream.range(0, 100).boxed().map(i -> executor.submit(() -> {
+            admin.unassignTransportProvider(task);
+            admin.assignTransportProvider(task);
+            datastreamConfigByDestination.put(destination, config);
+        })).collect(Collectors.toList());
+
+        results.forEach(r -> {
+            try {
+                r.get();
+            } catch (final Exception e) {
+                throw new RuntimeException(e);
+            }
+        });
+
+        assertEquals(datastreamConfigByDestination.size(), 1);
+    }
+
+
+    @Test
+    public void testAssignMultipleTasksPerDatastream() {
+        final BigqueryTransportProviderAdmin admin = new BigqueryTransportProviderAdmin(
+                bufferedTransportProvider,
+                defaultSchemaEvolver,
+                datastreamConfigByDestination,
+                bigquerySchemaEvolverMap,
+                bigqueryTransportProviderFactory,
+                bigqueryDatastreamConfigurationFactory,
+                defaultProjectId,
+                defaultSchemaRegistryUrl
+        );
+        final String datastreamName = "test";
+        final String schemaRegistryLocation = "https://schema-registry";
+        final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination("project", "dataset", "table");
+        final Datastream datastream = DatastreamTestUtils.createDatastream("connector", datastreamName, "source", destination.toString(), 1);
+        datastream.getMetadata().put(METADATA_SCHEMA_REGISTRY_LOCATION_KEY, schemaRegistryLocation);
+        final BigqueryDatastreamConfiguration config = BigqueryDatastreamConfiguration.builder(
+                destination,
+                defaultSchemaEvolver,
+                true,
+                deserializer,
+                serializer
+        ).build();
+        when(bigqueryDatastreamConfigurationFactory.createBigqueryDatastreamConfiguration(
+                destination,
+                datastreamName,
+                schemaRegistryLocation,
+                config.getSchemaEvolver(),
+                config.isCreateDestinationTableEnabled(),
+                null,
+                null,
+                null,
+                null
+        )).thenReturn(config);
+        final BigqueryTransportProvider bigqueryTransportProvider = mock(BigqueryTransportProvider.class);
+
+        when(bigqueryTransportProviderFactory.createTransportProvider(bufferedTransportProvider, serializer, deserializer, config, datastreamConfigByDestination
+        )).thenReturn(bigqueryTransportProvider);
+        when(bigqueryTransportProvider.getDestinations()).thenReturn(ImmutableSet.of(destination));
+
+        final DatastreamTask firstTask = new DatastreamTaskImpl(Collections.singletonList(datastream));
+
+        admin.assignTransportProvider(firstTask);
+        datastreamConfigByDestination.put(destination, config);
+
+        final DatastreamTask secondTask = new DatastreamTaskImpl(Collections.singletonList(datastream));
+        admin.assignTransportProvider(secondTask);
+
+        admin.unassignTransportProvider(firstTask);
+
+        assertEquals(datastreamConfigByDestination.size(), 1);
+        verify(bigqueryTransportProvider, never()).close();
     }
 
     @DataProvider(name = "datastream config test cases")

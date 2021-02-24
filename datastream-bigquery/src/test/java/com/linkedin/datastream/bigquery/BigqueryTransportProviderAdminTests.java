@@ -228,6 +228,7 @@ public class BigqueryTransportProviderAdminTests {
                 null,
                 null,
                 null,
+                null,
                 null
         )).thenReturn(config);
         final BigqueryTransportProvider bigqueryTransportProvider = mock(BigqueryTransportProvider.class);
@@ -290,6 +291,7 @@ public class BigqueryTransportProviderAdminTests {
                 schemaRegistryLocation,
                 config.getSchemaEvolver(),
                 config.isCreateDestinationTableEnabled(),
+                null,
                 null,
                 null,
                 null,

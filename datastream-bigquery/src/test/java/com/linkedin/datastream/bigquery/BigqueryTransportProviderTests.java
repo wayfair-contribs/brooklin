@@ -55,11 +55,12 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.Collections;
 import java.util.Date;
-import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -119,7 +120,7 @@ public class BigqueryTransportProviderTests {
         final String topicName = getUniqueTopicName();
         final String tableName = BigqueryBatchCommitter.sanitizeTableName(topicName);
         final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination(projectId, datasetName, tableName);
-        final Map<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> destConfigs = new HashMap<>();
+        final ConcurrentMap<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> destConfigs = new ConcurrentHashMap<>();
         final BigqueryDatastreamConfiguration config = BigqueryDatastreamConfiguration.builder(
                 destination, BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.dynamic), true,
                 valueDeserializer, valueSerializer).build();
@@ -218,7 +219,7 @@ public class BigqueryTransportProviderTests {
         final BigqueryDatastreamConfiguration config = BigqueryDatastreamConfiguration.builder(
                 destination, BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.dynamic), true,
                 valueDeserializer, valueSerializer).build();
-        final Map<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> destConfigs = new HashMap<>();
+        final ConcurrentMap<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> destConfigs = new ConcurrentHashMap<>();
         destConfigs.put(destination, config);
 
         final BigqueryBatchCommitter committer = new BigqueryBatchCommitter(bigQuery, 1, destConfigs);
@@ -319,7 +320,7 @@ public class BigqueryTransportProviderTests {
         final String topicName = getUniqueTopicName();
         final String tableName = BigqueryBatchCommitter.sanitizeTableName(topicName);
         final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination(projectId, datasetName, tableName);
-        final Map<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> destConfigs = new HashMap<>();
+        final ConcurrentMap<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> destConfigs = new ConcurrentHashMap<>();
         final BigqueryDatastreamConfiguration config = BigqueryDatastreamConfiguration.builder(
                 destination, BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.dynamic), true,
                 valueDeserializer, valueSerializer).build();
@@ -417,7 +418,7 @@ public class BigqueryTransportProviderTests {
         final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination(projectId, datasetName, tableName);
         final TableId exceptionsTableId = TableId.of(projectId, datasetName, topicName + "_exceptions");
         final BigqueryDatastreamDestination deadLetterTableDestination = new BigqueryDatastreamDestination(projectId, datasetName, exceptionsTableId.getTable());
-        final Map<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> destConfigs = new HashMap<>();
+        final ConcurrentMap<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> destConfigs = new ConcurrentHashMap<>();
         final BigqueryDatastreamConfiguration config = BigqueryDatastreamConfiguration.builder(
                 destination, BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.dynamic), true,
                 valueDeserializer, valueSerializer)
@@ -559,7 +560,7 @@ public class BigqueryTransportProviderTests {
         final BigqueryDatastreamDestination destination = new BigqueryDatastreamDestination(projectId, datasetName, tableName);
         final TableId exceptionsTableId = TableId.of(projectId, datasetName, topicName + "_exceptions");
         final BigqueryDatastreamDestination deadLetterTableDestination = new BigqueryDatastreamDestination(projectId, datasetName, exceptionsTableId.getTable());
-        final Map<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> destConfigs = new HashMap<>();
+        final ConcurrentMap<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> destConfigs = new ConcurrentHashMap<>();
         final BigqueryDatastreamConfiguration config = BigqueryDatastreamConfiguration.builder(
                 destination, BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.dynamic), true,
                 valueDeserializer, valueSerializer

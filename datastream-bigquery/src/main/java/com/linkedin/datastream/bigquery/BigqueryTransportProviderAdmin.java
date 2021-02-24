@@ -13,6 +13,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -68,9 +69,9 @@ public class BigqueryTransportProviderAdmin implements TransportProviderAdmin {
     private final BigqueryDatastreamConfigurationFactory _bigqueryDatastreamConfigurationFactory;
 
     private final Map<String, BigquerySchemaEvolver> _bigquerySchemaEvolverMap;
-    private final Map<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> _datastreamConfigByDestination;
-    private final Map<Datastream, BigqueryTransportProvider> _datastreamTransportProvider;
-    private final Map<BigqueryTransportProvider, Set<DatastreamTask>> _transportProviderTasks;
+    private final ConcurrentMap<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> _datastreamConfigByDestination;
+    private final ConcurrentMap<Datastream, BigqueryTransportProvider> _datastreamTransportProvider;
+    private final ConcurrentMap<BigqueryTransportProvider, ConcurrentHashMap.KeySetView<DatastreamTask, Boolean>> _transportProviderTasks;
 
     private final Pattern _legacyDatastreamDestinationConnectionStringPattern;
 
@@ -81,7 +82,7 @@ public class BigqueryTransportProviderAdmin implements TransportProviderAdmin {
      */
     public BigqueryTransportProviderAdmin(final BigqueryBufferedTransportProvider bufferedTransportProvider,
                                           final BigquerySchemaEvolver defaultSchemaEvolver,
-                                          final Map<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> datastreamConfigByDestination,
+                                          final ConcurrentMap<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> datastreamConfigByDestination,
                                           final Map<String, BigquerySchemaEvolver> bigquerySchemaEvolverMap,
                                           final BigqueryTransportProviderFactory bigqueryTransportProviderFactory,
                                           final BigqueryDatastreamConfigurationFactory bigqueryDatastreamConfigurationFactory,
@@ -117,11 +118,20 @@ public class BigqueryTransportProviderAdmin implements TransportProviderAdmin {
                 throw new DatastreamRuntimeException("Unable to assign invalid datastream", e);
             }
         }
-        return _datastreamTransportProvider.computeIfAbsent(datastream, d -> {
-            final BigqueryDatastreamConfiguration configuration = getConfigurationFromDatastream(d);
-            final BigqueryTransportProvider transportProvider =  _bigqueryTransportProviderFactory.createTransportProvider(_bufferedTransportProvider,
-                    configuration.getValueSerializer(), configuration.getValueDeserializer(), configuration, _datastreamConfigByDestination);
-            _transportProviderTasks.computeIfAbsent(transportProvider, tp -> ConcurrentHashMap.newKeySet()).add(task);
+
+        return _datastreamTransportProvider.compute(datastream, (d, transportProvider) -> {
+            if (transportProvider == null) {
+                final BigqueryDatastreamConfiguration configuration = getConfigurationFromDatastream(d);
+                transportProvider = _bigqueryTransportProviderFactory.createTransportProvider(_bufferedTransportProvider,
+                        configuration.getValueSerializer(), configuration.getValueDeserializer(), configuration, _datastreamConfigByDestination);
+            }
+            _transportProviderTasks.compute(transportProvider, (tp, taskSet) -> {
+                if (taskSet == null) {
+                    taskSet = ConcurrentHashMap.newKeySet();
+                }
+                taskSet.add(task);
+                return taskSet;
+            });
             return transportProvider;
         });
     }
@@ -138,16 +148,23 @@ public class BigqueryTransportProviderAdmin implements TransportProviderAdmin {
     public void unassignTransportProvider(final DatastreamTask task) {
         // Assume that the task has a single datastream
         final Datastream datastream = task.getDatastreams().get(0);
-        _datastreamTransportProvider.computeIfPresent(datastream, (d, transportProvider) ->
-            Optional.ofNullable(_transportProviderTasks.computeIfPresent(transportProvider, (tp, tasks) -> {
+        _datastreamTransportProvider.computeIfPresent(datastream, (d, transportProvider) -> {
+            // Remove the task from the transport provider tasks set and clear out the mapping if the tasks set is empty
+            final Set<DatastreamTask> remainingTransportProviderTasks = _transportProviderTasks.computeIfPresent(transportProvider, (tp, tasks) -> {
                 tasks.remove(task);
                 return tasks.isEmpty() ? null : tasks;
-            })).map(s -> transportProvider).orElseGet(() -> {
-                transportProvider.getDestinations().forEach(_datastreamConfigByDestination::remove);
+            });
+
+            // If the transport provider has no more tasks assigned, then close and remove the mapping, else retain the mapping
+            if (remainingTransportProviderTasks == null || remainingTransportProviderTasks.isEmpty()) {
+                // Do not remove destination configurations as we do not know when the last event is committed
+                //transportProvider.getDestinations().forEach(_datastreamConfigByDestination::remove);
                 transportProvider.close();
                 return null;
-            })
-        );
+            } else {
+                return transportProvider;
+            }
+        });
     }
 
     @Override

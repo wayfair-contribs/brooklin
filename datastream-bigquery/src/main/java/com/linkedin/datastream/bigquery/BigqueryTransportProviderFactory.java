@@ -6,7 +6,7 @@
 
 package com.linkedin.datastream.bigquery;
 
-import java.util.Map;
+import java.util.concurrent.ConcurrentMap;
 
 import com.linkedin.datastream.serde.Deserializer;
 
@@ -28,7 +28,8 @@ public class BigqueryTransportProviderFactory {
                                                              final Serializer valueSerializer,
                                                              final Deserializer valueDeserializer,
                                                              final BigqueryDatastreamConfiguration datastreamConfiguration,
-                                                             final Map<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> destinationConfigs) {
+                                                             final ConcurrentMap<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration>
+                                                                     destinationConfigs) {
         return new BigqueryTransportProvider(bufferedTransportProvider, valueSerializer, valueDeserializer,
                 datastreamConfiguration, destinationConfigs);
     }

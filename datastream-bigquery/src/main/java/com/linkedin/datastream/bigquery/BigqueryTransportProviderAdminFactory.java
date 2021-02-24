@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -59,7 +60,7 @@ public class BigqueryTransportProviderAdminFactory implements TransportProviderA
         // Create a map to define datastream destination to configuration mappings and share with multiple components.
         // Datastream destination to configuration mappings are initialized when new datastreams are created or assigned for processing.
         // TODO: potentially replace the shared map with a datastream configuration registry implementation
-        final Map<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> datastreamConfigByDestination = new ConcurrentHashMap<>();
+        final ConcurrentMap<BigqueryDatastreamDestination, BigqueryDatastreamConfiguration> datastreamConfigByDestination = new ConcurrentHashMap<>();
         final String committerProjectId;
         final BigqueryBatchCommitter committer;
         {

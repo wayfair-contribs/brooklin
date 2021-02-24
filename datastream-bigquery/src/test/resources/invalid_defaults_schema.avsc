@@ -1,0 +1,15 @@
+{
+  "type": "record",
+  "name": "invalid_defaults",
+  "namespace": "test",
+  "fields": [
+    {
+      "name": "amend_operation",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": "null"
+    }
+  ]
+}

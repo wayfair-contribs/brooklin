@@ -7,6 +7,7 @@
 package com.linkedin.datastream.bigquery;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -16,7 +17,7 @@ import org.apache.avro.Schema;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.confluent.kafka.schemaregistry.client.CachedSchemaRegistryClient;
+import io.confluent.kafka.schemaregistry.client.SchemaRegistryClient;
 import io.confluent.kafka.schemaregistry.client.rest.exceptions.RestClientException;
 import io.confluent.kafka.serializers.AbstractKafkaAvroSerDeConfig;
 import io.confluent.kafka.serializers.KafkaAvroDeserializer;
@@ -36,15 +37,16 @@ public class BigqueryDatastreamConfigurationFactory {
 
     /**
      * Create a BigqueryDatastreamConfiguration.
-     * @param destination
-     * @param datastreamName
-     * @param schemaRegistryLocation
-     * @param schemaEvolver
-     * @param autoCreateTable
-     * @param partitionExpirationDays
-     * @param deadLetterTableConfiguration
-     * @param labels
-     * @param schemaId
+     * @param destination a BigqueryDatastreamDestination
+     * @param datastreamName the name of the Datastream
+     * @param schemaRegistryLocation a String pointing to a schema registry endpoint
+     * @param schemaEvolver a BigquerySchemaEvolver
+     * @param autoCreateTable a boolean controlling if the destination table should be auto-created
+     * @param partitionExpirationDays a Long to define partition expiration days, if null partitions are not set to expire
+     * @param deadLetterTableConfiguration a BigqueryDatastreamConfiguration for the dead letter table associated with this Datastream
+     * @param labels a List of BigqueryLabel to set on the destination table
+     * @param schemaId an optional Integer for a fixed schema id
+     * @param relaxedAvroSchemaValidation an optional Boolean to control relaxed Avro schema validation for this Datastream
      * @return the BigqueryDatastreamConfiguration
      */
     public BigqueryDatastreamConfiguration createBigqueryDatastreamConfiguration(
@@ -56,17 +58,30 @@ public class BigqueryDatastreamConfigurationFactory {
             final Long partitionExpirationDays,
             final BigqueryDatastreamConfiguration deadLetterTableConfiguration,
             final List<BigqueryLabel> labels,
-            final Integer schemaId) {
-        final CachedSchemaRegistryClient confluentSchemaRegistryClient = new CachedSchemaRegistryClient(
+            final Integer schemaId,
+            final Boolean relaxedAvroSchemaValidation) {
+
+        // If relaxed Avro schema validation is defined, then explicitly enable/disable validations via config, otherwise use validation defaults
+        final Map<String, ?> schemaRegistryConfig = Optional.ofNullable(relaxedAvroSchemaValidation)
+                // Convert relaxedAvroSchemaValidation boolean to enableValidation boolean
+                .map(b -> !b)
+                .map(enableValidation -> {
+                    final Map<String, Object> config = new HashMap<>(2);
+                    config.put(BigquerySchemaRegistryClientConfig.SCHEMA_REGISTRY_PARSER_VALIDATE_FIELD_NAMES, enableValidation);
+                    config.put(BigquerySchemaRegistryClientConfig.SCHEMA_REGISTRY_PARSER_VALIDATE_DEFAULTS, enableValidation);
+                    return Collections.unmodifiableMap(config);
+                }).orElse(Collections.emptyMap());
+        final SchemaRegistryClient schemaRegistryClient = new BigqueryCachedSchemaRegistryClient(
                 schemaRegistryLocation,
-                AbstractKafkaAvroSerDeConfig.MAX_SCHEMAS_PER_SUBJECT_DEFAULT
+                AbstractKafkaAvroSerDeConfig.MAX_SCHEMAS_PER_SUBJECT_DEFAULT,
+                schemaRegistryConfig
         );
 
         final Map<String, Object> valueSerDeConfig = new HashMap<>();
         valueSerDeConfig.put(KafkaAvroDeserializerConfig.SCHEMA_REGISTRY_URL_CONFIG, schemaRegistryLocation);
 
-        final KafkaSerializer valueSerializer = new KafkaSerializer(new KafkaAvroSerializer(confluentSchemaRegistryClient, valueSerDeConfig));
-        final KafkaDeserializer valueDeserializer = new KafkaDeserializer(new KafkaAvroDeserializer(confluentSchemaRegistryClient, valueSerDeConfig));
+        final KafkaSerializer valueSerializer = new KafkaSerializer(new KafkaAvroSerializer(schemaRegistryClient, valueSerDeConfig));
+        final KafkaDeserializer valueDeserializer = new KafkaDeserializer(new KafkaAvroDeserializer(schemaRegistryClient, valueSerDeConfig));
 
 
         final BigqueryDatastreamConfiguration.Builder configBuilder = BigqueryDatastreamConfiguration.builder(
@@ -82,7 +97,7 @@ public class BigqueryDatastreamConfigurationFactory {
                 throw new IllegalArgumentException("schema ID is required for fixed schema evolution mode");
             }
             try {
-                final Schema schema = confluentSchemaRegistryClient.getByID(schemaId);
+                final Schema schema = schemaRegistryClient.getById(schemaId);
                 if (schema != null) {
                     configBuilder.withFixedSchema(schema);
                 } else {

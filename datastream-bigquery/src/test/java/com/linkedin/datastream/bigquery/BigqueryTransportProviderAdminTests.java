@@ -37,6 +37,7 @@ import static com.linkedin.datastream.bigquery.BigqueryTransportProviderAdmin.ME
 import static com.linkedin.datastream.bigquery.BigqueryTransportProviderAdmin.METADATA_DEAD_LETTER_TABLE_KEY;
 import static com.linkedin.datastream.bigquery.BigqueryTransportProviderAdmin.METADATA_LABELS_KEY;
 import static com.linkedin.datastream.bigquery.BigqueryTransportProviderAdmin.METADATA_PARTITION_EXPIRATION_DAYS_KEY;
+import static com.linkedin.datastream.bigquery.BigqueryTransportProviderAdmin.METADATA_RELAX_AVRO_SCHEMA_VALIDATION;
 import static com.linkedin.datastream.bigquery.BigqueryTransportProviderAdmin.METADATA_SCHEMA_EVOLUTION_MODE_KEY;
 import static com.linkedin.datastream.bigquery.BigqueryTransportProviderAdmin.METADATA_SCHEMA_ID_KEY;
 import static com.linkedin.datastream.bigquery.BigqueryTransportProviderAdmin.METADATA_SCHEMA_REGISTRY_LOCATION_KEY;
@@ -112,6 +113,7 @@ public class BigqueryTransportProviderAdminTests {
                 null,
                 null,
                 null,
+                null,
                 null
         )).thenReturn(config);
         final BigqueryTransportProvider bigqueryTransportProvider = mock(BigqueryTransportProvider.class);
@@ -157,6 +159,7 @@ public class BigqueryTransportProviderAdminTests {
                 schemaRegistryLocation,
                 config.getSchemaEvolver(),
                 config.isCreateDestinationTableEnabled(),
+                null,
                 null,
                 null,
                 null,
@@ -208,6 +211,38 @@ public class BigqueryTransportProviderAdminTests {
                         ImmutableMap.of(
                                 METADATA_SCHEMA_REGISTRY_LOCATION_KEY, "https://schema-registry",
                                 METADATA_SCHEMA_EVOLUTION_MODE_KEY, BigquerySchemaEvolverType.dynamic.getModeName()
+                        ),
+                        BigqueryDatastreamConfiguration.builder(new BigqueryDatastreamDestination("project", "dataset", "dest"),
+                                BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.dynamic), true, deserializer, serializer)
+                                .withDeadLetterTableConfiguration(BigqueryDatastreamConfiguration
+                                        .builder(new BigqueryDatastreamDestination("project", "dataset", "dest_exceptions"),
+                                                BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.dynamic),
+                                                true,
+                                                deserializer, serializer).build())
+                                .build()
+                },
+                {
+                        new BigqueryDatastreamDestination("project", "dataset", "dest"),
+                        ImmutableMap.of(
+                                METADATA_SCHEMA_REGISTRY_LOCATION_KEY, "https://schema-registry",
+                                METADATA_SCHEMA_EVOLUTION_MODE_KEY, BigquerySchemaEvolverType.dynamic.getModeName(),
+                                METADATA_RELAX_AVRO_SCHEMA_VALIDATION, Boolean.TRUE.toString()
+                        ),
+                        BigqueryDatastreamConfiguration.builder(new BigqueryDatastreamDestination("project", "dataset", "dest"),
+                                BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.dynamic), true, deserializer, serializer)
+                                .withDeadLetterTableConfiguration(BigqueryDatastreamConfiguration
+                                        .builder(new BigqueryDatastreamDestination("project", "dataset", "dest_exceptions"),
+                                                BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.dynamic),
+                                                true,
+                                                deserializer, serializer).build())
+                                .build()
+                },
+                {
+                        new BigqueryDatastreamDestination("project", "dataset", "dest"),
+                        ImmutableMap.of(
+                                METADATA_SCHEMA_REGISTRY_LOCATION_KEY, "https://schema-registry",
+                                METADATA_SCHEMA_EVOLUTION_MODE_KEY, BigquerySchemaEvolverType.dynamic.getModeName(),
+                                METADATA_RELAX_AVRO_SCHEMA_VALIDATION, Boolean.FALSE.toString()
                         ),
                         BigqueryDatastreamConfiguration.builder(new BigqueryDatastreamDestination("project", "dataset", "dest"),
                                 BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.dynamic), true, deserializer, serializer)
@@ -283,6 +318,8 @@ public class BigqueryTransportProviderAdminTests {
         final List<BigqueryLabel> labels = Optional.ofNullable(datastreamMetadata.get(METADATA_LABELS_KEY))
             .map(admin::parseLabelsString).orElse(null);
         final Integer schemaId = Optional.ofNullable(datastreamMetadata.get(METADATA_SCHEMA_ID_KEY)).map(Integer::valueOf).orElse(null);
+        final Boolean relaxedAvroSchemaValidation = Optional.ofNullable(datastreamMetadata.get(METADATA_RELAX_AVRO_SCHEMA_VALIDATION))
+                .map(Boolean::valueOf).orElse(null);
 
         when(bigqueryDatastreamConfigurationFactory.createBigqueryDatastreamConfiguration(
                 deadLetterTable,
@@ -290,6 +327,7 @@ public class BigqueryTransportProviderAdminTests {
                 schemaRegistryUrl,
                 BigquerySchemaEvolverFactory.createBigquerySchemaEvolver(BigquerySchemaEvolverType.dynamic),
                 true,
+                null,
                 null,
                 null,
                 null,
@@ -304,7 +342,8 @@ public class BigqueryTransportProviderAdminTests {
                 partitionExpirationDays,
                 expectedConfiguration.getDeadLetterTableConfiguration().orElse(null),
                 labels,
-                schemaId
+                schemaId,
+                relaxedAvroSchemaValidation
         )).thenReturn(expectedConfiguration);
         final BigqueryDatastreamConfiguration config = admin.getConfigurationFromDatastream(datastream);
         assertEquals(config, expectedConfiguration);

@@ -118,13 +118,21 @@ public class BigqueryTransportProviderAdmin implements TransportProviderAdmin {
             }
         }
 
-        final BigqueryTransportProvider transportProvider = _datastreamTransportProvider.computeIfAbsent(datastream, d -> {
-            final BigqueryDatastreamConfiguration configuration = getConfigurationFromDatastream(d);
-            return  _bigqueryTransportProviderFactory.createTransportProvider(_bufferedTransportProvider,
-                    configuration.getValueSerializer(), configuration.getValueDeserializer(), configuration, _datastreamConfigByDestination);
+        return _datastreamTransportProvider.compute(datastream, (d, transportProvider) -> {
+            if (transportProvider == null) {
+                final BigqueryDatastreamConfiguration configuration = getConfigurationFromDatastream(d);
+                transportProvider = _bigqueryTransportProviderFactory.createTransportProvider(_bufferedTransportProvider,
+                        configuration.getValueSerializer(), configuration.getValueDeserializer(), configuration, _datastreamConfigByDestination);
+            }
+            _transportProviderTasks.compute(transportProvider, (tp, taskSet) -> {
+                if (taskSet == null) {
+                    taskSet = ConcurrentHashMap.newKeySet();
+                }
+                taskSet.add(task);
+                return taskSet;
+            });
+            return transportProvider;
         });
-        _transportProviderTasks.computeIfAbsent(transportProvider, tp -> ConcurrentHashMap.newKeySet()).add(task);
-        return transportProvider;
     }
 
     Map<Datastream, BigqueryTransportProvider> getDatastreamTransportProviders() {

@@ -1,0 +1,1116 @@
+{
+  "type": "record",
+  "name": "unionTypeSchemaCheck",
+  "fields": [
+    {
+      "name": "col_null",
+      "type": "null"
+    },
+    {
+      "name": "col_boolean",
+      "type": "boolean",
+      "default": false
+    },
+    {
+      "name": "col_int",
+      "type": "int",
+      "default": 10
+    },
+    {
+      "name": "col_long",
+      "type": "long",
+      "default": 100
+    },
+    {
+      "name": "col_float",
+      "type": "float",
+      "default": 10.1
+    },
+    {
+      "name": "col_double",
+      "type": "double",
+      "default": 100.1
+    },
+    {
+      "name": "col_bytes",
+      "type": "bytes",
+      "default": "abc"
+    },
+    {
+      "name": "col_string",
+      "type": "string",
+      "default": "str"
+    },
+    {
+      "name": "col_enum",
+      "type": {
+        "type": "enum",
+        "name": "gender",
+        "symbols": [
+          "MALE",
+          "FEMALE"
+        ]
+      },
+      "default": "MALE"
+    },
+    {
+      "name": "col_fixed",
+      "type": {
+        "type": "fixed",
+        "name": "fixed_name",
+        "size": 2
+      }
+    },
+    {
+      "name": "col_array_boolean",
+      "type": {
+        "type": "array",
+        "items": "boolean"
+      },
+      "default": [
+        true,
+        false
+      ]
+    },
+    {
+      "name": "col_array_int",
+      "type": {
+        "type": "array",
+        "items": "int"
+      },
+      "default": [
+        1,
+        2
+      ]
+    },
+    {
+      "name": "col_array_long",
+      "type": {
+        "type": "array",
+        "items": "long"
+      },
+      "default": [
+        1,
+        2
+      ]
+    },
+    {
+      "name": "col_array_float",
+      "type": {
+        "type": "array",
+        "items": "float"
+      },
+      "default": [
+        1.1,
+        2.2
+      ]
+    },
+    {
+      "name": "col_array_double",
+      "type": {
+        "type": "array",
+        "items": "double"
+      },
+      "default": [
+        1.1,
+        2.2
+      ]
+    },
+    {
+      "name": "col_array_bytes",
+      "type": {
+        "type": "array",
+        "items": "bytes"
+      }
+    },
+    {
+      "name": "col_array_string",
+      "type": {
+        "type": "array",
+        "items": "string"
+      },
+      "default": [
+        "abc",
+        "bcd"
+      ]
+    },
+    {
+      "name": "col_array_record",
+      "type": {
+        "type": "array",
+        "items": {
+          "type": "record",
+          "name": "inner_record",
+          "fields": [
+            {
+              "name": "name",
+              "type": "string"
+            },
+            {
+              "name": "surname",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "col_array_enum",
+      "type": {
+        "type": "array",
+        "items": {
+          "type": "enum",
+          "name": "enum_fruit",
+          "symbols": [
+            "ORANGE",
+            "APPLE",
+            "PINEAPPLE"
+          ]
+        }
+      }
+    },
+    {
+      "name": "col_array_map",
+      "type": {
+        "type": "array",
+        "items": {
+          "type": "map",
+          "values": "string"
+        }
+      }
+    },
+    {
+      "name": "col_array_union",
+      "type": {
+        "type": "array",
+        "items": [
+          "int",
+          "string"
+        ]
+      }
+    },
+    {
+      "name": "col_array_opt_union",
+      "type": {
+        "type": "array",
+        "items": [
+          "null",
+          "string"
+        ]
+      }
+    },
+    {
+      "name": "col_array_fixed",
+      "type": {
+        "type": "array",
+        "items": {
+          "type": "fixed",
+          "name": "arr_fixed_name",
+          "size": 5
+        }
+      }
+    },
+    {
+      "name": "col_record_boolean",
+      "type": {
+        "type": "record",
+        "name": "record_bool",
+        "fields": [
+          {
+            "name": "a_bool",
+            "type": "boolean",
+            "default": true
+          },
+          {
+            "name": "b_bool",
+            "type": "boolean",
+            "default": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "col_record_int",
+      "type": {
+        "type": "record",
+        "name": "record_int",
+        "fields": [
+          {
+            "name": "a_int",
+            "type": "int"
+          },
+          {
+            "name": "b_int",
+            "type": "int"
+          }
+        ]
+      }
+    },
+    {
+      "name": "col_record_long",
+      "type": {
+        "type": "record",
+        "name": "record_long",
+        "fields": [
+          {
+            "name": "a_long",
+            "type": "long"
+          },
+          {
+            "name": "b_long",
+            "type": "long"
+          }
+        ]
+      }
+    },
+    {
+      "name": "col_record_float",
+      "type": {
+        "type": "record",
+        "name": "record_float",
+        "fields": [
+          {
+            "name": "a_float",
+            "type": "float"
+          },
+          {
+            "name": "b_float",
+            "type": "float"
+          }
+        ]
+      }
+    },
+    {
+      "name": "col_record_double",
+      "type": {
+        "type": "record",
+        "name": "record_double",
+        "fields": [
+          {
+            "name": "a_double",
+            "type": "double"
+          },
+          {
+            "name": "b_double",
+            "type": "double"
+          }
+        ]
+      }
+    },
+    {
+      "name": "col_record_bytes",
+      "type": {
+        "type": "record",
+        "name": "record_bytes",
+        "fields": [
+          {
+            "name": "a_bytes",
+            "type": "bytes"
+          },
+          {
+            "name": "b_bytes",
+            "type": "bytes"
+          }
+        ]
+      }
+    },
+    {
+      "name": "col_record_string",
+      "type": {
+        "type": "record",
+        "name": "record_string",
+        "fields": [
+          {
+            "name": "a_string",
+            "type": "string"
+          },
+          {
+            "name": "b_string",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "col_record_record",
+      "type": {
+        "type": "record",
+        "name": "record_record",
+        "fields": [
+          {
+            "name": "a_record",
+            "type": {
+              "type": "record",
+              "name": "a_record_record",
+              "fields": [
+                {
+                  "name": "a_record_record_string",
+                  "type": "string"
+                },
+                {
+                  "name": "a_record_record_int",
+                  "type": "int"
+                }
+              ]
+            }
+          },
+          {
+            "name": "b_record",
+            "type": {
+              "type": "record",
+              "name": "b_record_record",
+              "fields": [
+                {
+                  "name": "b_record_record_string",
+                  "type": "string"
+                },
+                {
+                  "name": "b_record_record_int",
+                  "type": "int"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "col_record_enum",
+      "type": {
+        "type": "record",
+        "name": "record_enum",
+        "fields": [
+          {
+            "name": "a_enum",
+            "type": {
+              "type": "enum",
+              "name": "enum_gender",
+              "symbols": [
+                "MALE",
+                "FEMALE"
+              ]
+            }
+          },
+          {
+            "name": "b_enum",
+            "type": {
+              "type": "enum",
+              "name": "enum_answer",
+              "symbols": [
+                "YES",
+                "NO"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "col_record_array",
+      "type": {
+        "type": "record",
+        "name": "record_array",
+        "fields": [
+          {
+            "name": "a_array",
+            "type": {
+              "type": "array",
+              "items": "int"
+            }
+          },
+          {
+            "name": "b_array",
+            "type": {
+              "type": "array",
+              "items": "boolean"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "col_record_map",
+      "type": {
+        "type": "record",
+        "name": "record_map",
+        "fields": [
+          {
+            "name": "a_map",
+            "type": {
+              "type": "map",
+              "values": "int"
+            }
+          },
+          {
+            "name": "b_map",
+            "type": {
+              "type": "map",
+              "values": "string"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "col_record_union",
+      "type": {
+        "type": "record",
+        "name": "record_union",
+        "fields": [
+          {
+            "name": "a_union",
+            "type": [
+              "int",
+              "string"
+            ]
+          },
+          {
+            "name": "b_union",
+            "type": [
+              "boolean",
+              "string"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "col_record_fixed",
+      "type": {
+        "type": "record",
+        "name": "record_fixed",
+        "fields": [
+          {
+            "name": "a_fixed",
+            "type": {
+              "type": "fixed",
+              "name": "a_fixed_name",
+              "size": 2
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "col_map_boolean",
+      "type": {
+        "type": "map",
+        "values": "boolean"
+      }
+    },
+    {
+      "name": "col_map_int",
+      "type": {
+        "type": "map",
+        "values": "int"
+      }
+    },
+    {
+      "name": "col_map_long",
+      "type": {
+        "type": "map",
+        "values": "long"
+      }
+    },
+    {
+      "name": "col_map_float",
+      "type": {
+        "type": "map",
+        "values": "float"
+      }
+    },
+    {
+      "name": "col_map_double",
+      "type": {
+        "type": "map",
+        "values": "double"
+      }
+    },
+    {
+      "name": "col_map_bytes",
+      "type": {
+        "type": "map",
+        "values": "bytes"
+      }
+    },
+    {
+      "name": "col_map_string",
+      "type": {
+        "type": "map",
+        "values": "string"
+      }
+    },
+    {
+      "name": "col_map_record",
+      "type": {
+        "type": "map",
+        "values": {
+          "type": "record",
+          "name": "map_record_name",
+          "fields": [
+            {
+              "name": "map_record_int",
+              "type": "int"
+            },
+            {
+              "name": "map_record_string",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "col_map_enum",
+      "type": {
+        "type": "map",
+        "values": {
+          "type": "enum",
+          "name": "map_enum_name",
+          "symbols": [
+            "KID",
+            "ADULT",
+            "SENIOR"
+          ]
+        }
+      }
+    },
+    {
+      "name": "col_map_array",
+      "type": {
+        "type": "map",
+        "values": {
+          "type": "array",
+          "items": "int"
+        }
+      }
+    },
+    {
+      "name": "col_map_map",
+      "type": {
+        "type": "map",
+        "values": {
+          "type": "map",
+          "values": "int"
+        }
+      }
+    },
+    {
+      "name": "col_map_union",
+      "type": {
+        "type": "map",
+        "values": [
+          "string",
+          "boolean"
+        ]
+      }
+    },
+    {
+      "name": "col_map_fixed",
+      "type": {
+        "type": "map",
+        "values": {
+          "type": "fixed",
+          "name": "map_fixed_name",
+          "size": 3
+        }
+      }
+    },
+    {
+      "name": "col_union_opt_bool",
+      "type": [
+        "null",
+        "boolean"
+      ]
+    },
+    {
+      "name": "col_union_opt_int",
+      "type": [
+        "null",
+        "int"
+      ]
+    },
+    {
+      "name": "col_union_opt_long",
+      "type": [
+        "null",
+        "long"
+      ]
+    },
+    {
+      "name": "col_union_opt_float",
+      "type": [
+        "null",
+        "float"
+      ]
+    },
+    {
+      "name": "col_union_opt_double",
+      "type": [
+        "null",
+        "double"
+      ]
+    },
+    {
+      "name": "col_union_opt_bytes",
+      "type": [
+        "null",
+        "bytes"
+      ]
+    },
+    {
+      "name": "col_union_opt_string",
+      "type": [
+        "null",
+        "string"
+      ]
+    },
+    {
+      "name": "col_union_opt_record",
+      "type": [
+        "null",
+        {
+          "type": "record",
+          "name": "union_opt_record_name",
+          "fields": [
+            {
+              "name": "rec_string",
+              "type": "string"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "col_union_opt_enum",
+      "type": [
+        "null",
+        {
+          "type": "enum",
+          "name": "union_opt_enum_name",
+          "symbols": [
+            "RED",
+            "GREEN",
+            "YELLOW"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "col_union_opt_array",
+      "type": [
+        "null",
+        {
+          "type": "array",
+          "items": "int"
+        }
+      ]
+    },
+    {
+      "name": "col_union_opt_map",
+      "type": [
+        "null",
+        {
+          "type": "map",
+          "values": "string"
+        }
+      ]
+    },
+    {
+      "name": "col_union_opt_fixed",
+      "type": [
+        "null",
+        {
+          "type": "fixed",
+          "name": "union_opt_fixed_name",
+          "size": 5
+        }
+      ]
+    },
+    {
+      "name": "col_union_mult_primitive",
+      "type": [
+        "boolean",
+        "int",
+        "long",
+        "float",
+        "double",
+        "bytes",
+        "string",
+        {
+          "type": "enum",
+          "name": "union_mult_enum_name",
+          "symbols": [
+            "RED",
+            "GREEN",
+            "YELLOW"
+          ]
+        },
+        {
+          "type": "fixed",
+          "name": "union_mult_fixed",
+          "size": 3
+        }
+      ]
+    },
+    {
+      "name": "col_union_map_array",
+      "type": [
+        {
+          "type": "map",
+          "values": {
+            "type": "int",
+            "logicalType": "date"
+          }
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "int",
+            "logicalType": "date"
+          }
+        }
+      ]
+    },
+    {
+      "name": "col_union_array_record",
+      "type": [
+        {
+          "type": "array",
+          "items": {
+            "type": "int",
+            "logicalType": "date"
+          }
+        },
+        {
+          "type": "record",
+          "name": "union_record_name",
+          "fields": [
+            {
+              "name": "union_rec_string",
+              "type": "string"
+            },
+            {
+              "name": "nested_record",
+              "type": {
+                "type": "record",
+                "name": "union_nested2",
+                "fields": [
+                  {
+                    "name": "nested2_record_double",
+                    "type": "double"
+                  },
+                  {
+                    "name": "nested2_record_string",
+                    "type": "string"
+                  },
+                  {
+                    "name": "nested_rec2",
+                    "type": {
+                      "type": "record",
+                      "name": "union_nested",
+                      "fields": [
+                        {
+                          "name": "nested_record_double",
+                          "type": "double"
+                        },
+                        {
+                          "name": "nested_record_string",
+                          "type": "string"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "col_union_multi_fields",
+      "type": [
+        {
+          "type": "map",
+          "values": {
+            "type": "int",
+            "logicalType": "date"
+          }
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "int",
+            "logicalType": "date"
+          }
+        },
+        {
+          "type": "record",
+          "name": "union_multi_record_name",
+          "fields": [
+            {
+              "name": "union_multi_rec_string",
+              "type": "string"
+            },
+            {
+              "name": "multi_nested_record",
+              "type": {
+                "type": "record",
+                "name": "nested2",
+                "fields": [
+                  {
+                    "name": "nested2_record_double",
+                    "type": "double"
+                  },
+                  {
+                    "name": "nested2_record_string",
+                    "type": "string"
+                  },
+                  {
+                    "name": "nested_rec2",
+                    "type": {
+                      "type": "record",
+                      "name": "nested",
+                      "fields": [
+                        {
+                          "name": "nested_record_double",
+                          "type": "double"
+                        },
+                        {
+                          "name": "nested_record_string",
+                          "type": "string"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "type": "string",
+          "logicalType": "uuid"
+        },
+        {
+          "type": "int",
+          "logicalType": "date"
+        },
+        {
+          "type": "long",
+          "logicalType": "timestamp-micros"
+        }
+      ]
+    },
+    {
+      "name": "col_union_2_records",
+      "type": [
+        {
+          "type": "record",
+          "name": "union_1_record_name",
+          "fields": [
+            {
+              "name": "union_rec_1_string",
+              "type": "string"
+            }
+          ]
+        },
+        {
+          "type": "record",
+          "name": "union_2_record_name",
+          "fields": [
+            {
+              "name": "union_rec_2_string",
+              "type": "string"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "col_union_multi_records",
+      "type": [
+        {
+          "type": "record",
+          "name": "union_m1_record_name",
+          "fields": [
+            {
+              "name": "union_rec_m1_string",
+              "type": "string"
+            },
+            {
+              "name": "union_rec_m1_enum",
+              "type": {
+                "type": "enum",
+                "name": "union_rec_m1_enum_name",
+                "symbols": [
+                  "RED",
+                  "YELLOW",
+                  "GREEN"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "type": "record",
+          "name": "union_m2_record_name",
+          "fields": [
+            {
+              "name": "union_rec_2_string",
+              "type": "string"
+            },
+            {
+              "name": "union_rec_m2_enum",
+              "type": {
+                "type": "enum",
+                "name": "union_rec_m2_enum_name",
+                "symbols": [
+                  "RED",
+                  "YELLOW",
+                  "GREEN"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "col_union_multi_enums_string",
+      "type": [
+        {
+          "type": "enum",
+          "name": "union_enum_1_name",
+          "symbols": [
+            "BLACK",
+            "WHITE"
+          ]
+        },
+        {
+          "type": "enum",
+          "name": "union_enum_2_name",
+          "symbols": [
+            "BLACK",
+            "WHITE"
+          ]
+        },
+        {
+          "type": "enum",
+          "name": "union_enum_3_name",
+          "symbols": [
+            "SILVER",
+            "BLACK",
+            "WHITE"
+          ]
+        },
+        "string"
+      ]
+    },
+    {
+      "name": "col_union_enum_record",
+      "type": [
+        {
+          "type": "enum",
+          "name": "union_enum_name",
+          "symbols": [
+            "BLACK",
+            "WHITE"
+          ]
+        },
+        {
+          "type": "record",
+          "name": "union_record_a_name",
+          "fields": [
+            {
+              "name": "union_rec_a_string",
+              "type": "string"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "col_union_opt_timestampmilli",
+      "type": [
+        "int",
+        {
+          "type": "long",
+          "logicalType": "timestamp-millis"
+        }
+      ]
+    },
+    {
+      "name": "date_with_logical_type",
+      "type": {
+        "type": "int",
+        "logicalType": "date"
+      }
+    },
+    {
+      "name": "timemillis_with_logical_type",
+      "type": {
+        "type": "int",
+        "logicalType": "time-millis"
+      }
+    },
+    {
+      "name": "timemicros_with_logical_type",
+      "type": {
+        "type": "long",
+        "logicalType": "time-micros"
+      }
+    },
+    {
+      "name": "timestampmillis_with_logical_type",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    },
+    {
+      "name": "timestampmicros_with_logical_type",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-micros"
+      }
+    },
+    {
+      "name": "uuid_logical_type",
+      "type": {
+        "type": "string",
+        "logicalType": "uuid"
+      }
+    },
+    {
+      "name": "timestamp_no_logical_type",
+      "type": "long"
+    },
+    {
+      "name": "union_multi_logical",
+      "type": [
+        "null",
+        {
+          "type": "int",
+          "logicalType": "time-millis"
+        },
+        {
+          "type": "long",
+          "logicalType": "timestamp-millis"
+        }
+      ]
+    },
+    {
+      "name": "union_multi_logical2",
+      "type": [
+        "null",
+        {
+          "type": "long",
+          "logicalType": "time-micros"
+        },
+        "string"
+      ]
+    }
+  ]
+}

@@ -159,13 +159,18 @@ project(':datastream-common') {
 }
 
 project(':datastream-bigquery') {
+  checkstyle {
+    configFile = file("${project.rootDir}/checkstyle/checkstyle.xml")
+    sourceSets = [ getProject().sourceSets.main ]
+    toolVersion = "6.7"
+    ignoreFailures = false
+  }
   dependencies {
 
     compile "org.apache.avro:avro:$avroVersion"
     compile "org.apache.kafka:kafka-clients:$kafkaClientsVersion"
 
     compile "io.confluent:kafka-avro-serializer:$kafkaSchemaRegistryClientVersion"
-    compile "io.confluent:kafka-schema-registry:$kafkaSchemaRegistryVersion"
     compile "io.confluent:kafka-schema-registry-client:$kafkaSchemaRegistryClientVersion"
 
     compile "com.google.cloud:google-cloud-storage:$googleCloudStorageVersion"
@@ -174,6 +179,7 @@ project(':datastream-bigquery') {
     compile project(':datastream-server')
     compile project(':datastream-utils')
 
+    testCompile project(':datastream-testcommon')
     testCompile "org.mockito:mockito-core:$mockitoVersion"
 
     tasks.create(name: "copyDependentLibs", type: Copy) {
@@ -199,7 +205,6 @@ project(':datastream-cloud-storage') {
     compile "org.apache.parquet:parquet-column:$parquetWriterVersion"
 
     compile "io.confluent:kafka-avro-serializer:$kafkaSchemaRegistryClientVersion"
-    compile "io.confluent:kafka-schema-registry:$kafkaSchemaRegistryVersion"
     compile "io.confluent:kafka-schema-registry-client:$kafkaSchemaRegistryClientVersion"
 
     compile "com.google.cloud:google-cloud-storage:$googleCloudStorageVersion"
@@ -225,6 +230,7 @@ project(':datastream-server-api') {
   dependencies {
     compile project(':datastream-common')
     compile project(':datastream-utils')
+    testCompile "org.mockito:mockito-core:$mockitoVersion"
   }
 }
 
@@ -352,7 +358,7 @@ project(':datastream-tools') {
     compile "commons-cli:commons-cli:$commonsCliVersion"
   }
 
-  tasks.create(name: "releaseTarGz", dependsOn: configurations.archives.artifacts, type: Tar) {
+  tasks.create(name: "releaseTarGz", group: "distribution", dependsOn: configurations.archives.artifacts, type: Tar) {
     description = "Create Brooklin release tarball"
     baseName = "${rootProject.name}"
     into { "${property('baseName')}-$rootProject.version" }
@@ -386,6 +392,15 @@ project(':datastream-tools') {
     from(project(':datastream-kafka-connector').jar) { into("libs/") }
     from(project(':datastream-kafka-connector').configurations.runtime) { into("libs/") }
     duplicatesStrategy 'exclude'
+  }
+  tasks.create(name: "copyDependentLibs", type: Copy) {
+    from (configurations.runtime) {
+    }
+    into "$buildDir/dependent-libs"
+  }
+
+  jar {
+    dependsOn 'copyDependentLibs'
   }
 }
 

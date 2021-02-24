@@ -14,3 +14,12 @@ mainGeneratedRest/
 mainGeneratedDataTemplate/
 .DS_Store
 ligradle/
+
+# Kafka Web View data
+kafkawebview_data/
+
+# Local server properties
+server-local.properties
+
+# Local Brooklin data
+.brooklin/

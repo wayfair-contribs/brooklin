@@ -5,15 +5,16 @@
  */
 package com.linkedin.datastream.server.api.transport;
 
+import java.io.Closeable;
+
 import com.linkedin.datastream.common.SendCallback;
 import com.linkedin.datastream.server.DatastreamProducerRecord;
-
 
 /**
  * Brooklin is a transport agnostic system. This is the interface that each TransportProvider needs to implement
  * to plug the different transport mechanisms (Kafka, Kinesis, etc..) to Brooklin.
  */
-public interface TransportProvider {
+public interface TransportProvider extends Closeable {
   /**
    * Send the DatastreamEvent to the topic.
    *

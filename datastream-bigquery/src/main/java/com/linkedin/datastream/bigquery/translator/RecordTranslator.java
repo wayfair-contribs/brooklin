@@ -372,7 +372,7 @@ public class RecordTranslator {
     private static Map.Entry<String, Object> translateArrayTypeObject(Object record, Schema avroSchema, String name) {
         Map.Entry<String, Object> result;
         if (avroSchema.getElementType().getType() == Schema.Type.ARRAY) {
-            throw new IllegalArgumentException("Array of array types are not supported.");
+            throw new SchemaTranslationException("Array of array types are not supported.");
         }
 
         if (avroSchema.getElementType().getType() == Schema.Type.RECORD) {
@@ -423,7 +423,7 @@ public class RecordTranslator {
         Schema avroSchema = record.getSchema();
 
         if (avroSchema.getType() != Schema.Type.RECORD) {
-            throw new IllegalArgumentException("Object is not a Avro Record type.");
+            throw new SchemaTranslationException("Object is not a Avro Record type.");
         }
 
         TableRow fields = new TableRow();
@@ -456,22 +456,40 @@ public class RecordTranslator {
     }
 
     private static TableRow getMetadata() {
-        return new TableRow().set("ingest_timestamp", new DateTime(new Date(System.currentTimeMillis())));
+        return getMetadata(new DateTime(new Date(System.currentTimeMillis())));
+    }
+
+    /**
+     * Get metadata for this record.
+     * @param ingestTimestamp a DateTime representing the ingestion timestamp
+     * @return a TableRow containing the metadata
+     */
+    public static TableRow getMetadata(final DateTime ingestTimestamp) {
+        return new TableRow().set("ingest_timestamp", ingestTimestamp);
     }
 
     /**
      * translate given avro record into BQ row object.
      * @param avroRecord avro record
-     * @param avroSchema avro schema
      * @return BQ row
      */
-    public static InsertAllRequest.RowToInsert translate(GenericRecord avroRecord, Schema avroSchema) {
-        if (avroSchema.getType() != org.apache.avro.Schema.Type.RECORD) {
-            throw new IllegalArgumentException("The root of the record's schema should be a RECORD type.");
+    public static InsertAllRequest.RowToInsert translate(final GenericRecord avroRecord) {
+        return translate(avroRecord, getMetadata());
+    }
+
+    /**
+     * Translate the given avro record and metadata into a BQ row object.
+     * @param avroRecord a GenericRecord
+     * @param metadata a TableRow containing metadata
+     * @return BQ row
+     */
+    public static InsertAllRequest.RowToInsert translate(final GenericRecord avroRecord, final TableRow metadata) {
+        if (avroRecord.getSchema().getType() != org.apache.avro.Schema.Type.RECORD) {
+            throw new SchemaTranslationException("The root of the record's schema should be a RECORD type.");
         }
 
         TableRow row = translateRecord((GenericData.Record) avroRecord);
-        row.set("__metadata", getMetadata());
+        row.set("__metadata", metadata);
 
         return InsertAllRequest.RowToInsert.of(row);
     }

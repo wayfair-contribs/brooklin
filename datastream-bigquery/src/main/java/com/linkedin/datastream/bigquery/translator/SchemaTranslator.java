@@ -67,7 +67,7 @@ public class SchemaTranslator {
                 break;
             case ARRAY:
                 if (avroSchema.getElementType().getType() == org.apache.avro.Schema.Type.ARRAY) {
-                    throw new IllegalArgumentException("Array of array types are not supported.");
+                    throw new SchemaTranslationException("Array of array types are not supported.");
                 }
 
                 if (avroSchema.getElementType().getType() == org.apache.avro.Schema.Type.RECORD) {
@@ -318,7 +318,7 @@ public class SchemaTranslator {
             case NULL:
                 return null;
             default:
-                throw new IllegalArgumentException("Avro type not recognized.");
+                throw new SchemaTranslationException("Avro type not recognized.");
         }
 
         if (avroSchema.getDoc() != null) {
@@ -345,7 +345,7 @@ public class SchemaTranslator {
      */
     public static Schema translate(org.apache.avro.Schema avroSchema) {
         if (avroSchema.getType() != org.apache.avro.Schema.Type.RECORD) {
-            throw new IllegalArgumentException("The root of the record's schema should be a RECORD type.");
+            throw new SchemaTranslationException("The root of the record's schema should be a RECORD type.");
         }
 
         FieldList fields = translateRecordSchema(avroSchema);

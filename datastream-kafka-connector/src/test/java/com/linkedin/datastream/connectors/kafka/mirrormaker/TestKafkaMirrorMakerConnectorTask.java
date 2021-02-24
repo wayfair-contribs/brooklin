@@ -224,8 +224,10 @@ public class TestKafkaMirrorMakerConnectorTask extends BaseKafkaZkTest {
       @Override
       public Consumer<byte[], byte[]> createConsumer(Properties properties) {
         Consumer<byte[], byte[]> result = spy(super.createConsumer(properties));
-        doAnswer(invocation -> { remainingCommitSyncCalls.countDown(); return null; })
-            .when(result).commitSync(anyMapOf(TopicPartition.class, OffsetAndMetadata.class), any(Duration.class));
+        doAnswer(invocation -> {
+          remainingCommitSyncCalls.countDown();
+          return null;
+        }).when(result).commitSync(anyMapOf(TopicPartition.class, OffsetAndMetadata.class), any(Duration.class));
         return result;
       }
     };

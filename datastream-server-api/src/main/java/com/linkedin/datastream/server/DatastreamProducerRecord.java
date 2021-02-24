@@ -29,15 +29,10 @@ public class DatastreamProducerRecord {
   private final List<BrooklinEnvelope> _events;
 
   // timestamp of when the record was sent to transport provider
-  private Optional<Long> _eventsSendTimestamp = Optional.empty();
+  private Optional<Long> _eventsSendTimestamp;
 
   DatastreamProducerRecord(List<BrooklinEnvelope> events, Optional<Integer> partition, Optional<String> partitionKey,
-      String checkpoint, long eventsSourceTimestamp) {
-    this(events, partition, partitionKey, Optional.empty(), checkpoint, eventsSourceTimestamp);
-  }
-
-  DatastreamProducerRecord(List<BrooklinEnvelope> events, Optional<Integer> partition, Optional<String> partitionKey,
-      Optional<String> destination, String checkpoint, long eventsSourceTimestamp) {
+      Optional<String> destination, String checkpoint, long eventsSourceTimestamp, Optional<Long> eventSendTimestamp) {
     Validate.notNull(events, "null event");
     events.forEach((e) -> Validate.notNull(e, "null event"));
     Validate.isTrue(eventsSourceTimestamp > 0, "events source timestamp is invalid");
@@ -48,6 +43,7 @@ public class DatastreamProducerRecord {
     _checkpoint = checkpoint;
     _eventsSourceTimestamp = eventsSourceTimestamp;
     _destination = destination;
+    _eventsSendTimestamp = eventSendTimestamp;
   }
 
   /**

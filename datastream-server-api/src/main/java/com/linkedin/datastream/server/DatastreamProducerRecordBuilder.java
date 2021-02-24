@@ -30,6 +30,7 @@ public class DatastreamProducerRecordBuilder {
   private long _eventsSourceTimestamp;
   private Optional<String> _partitionKey = Optional.empty();
   private Optional<String> _destination = Optional.empty();
+  private Optional<Long> _eventSendTimestamp = Optional.empty();
 
   /**
    * Partition to which this DatastreamProducerRecord should be produced. If the partition is not set, TransportProvider
@@ -85,12 +86,22 @@ public class DatastreamProducerRecordBuilder {
   }
 
   /**
+   * Set the event send timestamp.
+   * @param eventSendTimestamp the timestamp
+   */
+  public void setEventsSendTimestamp(final long eventSendTimestamp) {
+    _eventSendTimestamp = Optional.of(eventSendTimestamp);
+  }
+
+  /**
    * Build the DatastreamProducerRecord.
    * @return
    *   DatastreamProducerRecord that is created.
    */
   public DatastreamProducerRecord build() {
     return new DatastreamProducerRecord(_events, _partition, _partitionKey, _destination, _sourceCheckpoint,
-        _eventsSourceTimestamp);
+        _eventsSourceTimestamp, _eventSendTimestamp);
   }
+
+
 }

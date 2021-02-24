@@ -17,4 +17,3 @@ include 'datastream-tools'
 include 'datastream-utils'
 include 'datastream-bigquery'
 include 'datastream-jdbc-connector'
-

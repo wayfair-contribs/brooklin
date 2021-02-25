@@ -1,4 +1,4 @@
-package com.linkedin.datastream.connectors.jdbc.cdc;
+package com.linkedin.datastream.connectors.jdbc;
 
 public class Utils {
 

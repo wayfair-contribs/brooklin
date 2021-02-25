@@ -1,16 +1,15 @@
 package com.linkedin.datastream.connectors.jdbc.cdc;
 
-import com.linkedin.datastream.common.DatastreamRuntimeException;
+import com.linkedin.datastream.connectors.jdbc.JDBCColumn;
+import com.linkedin.datastream.connectors.jdbc.Utils;
 
-import javax.rmi.CORBA.Util;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.util.Arrays;
+import java.sql.Time;
+import java.sql.Timestamp;
 
 public class ChangeEvent {
 
     // meta columns
-    private long txStartTime;
+    private Timestamp txStartTime;
     private int op;
     private byte[] seqVal;
     private CDCCheckPoint checkpoint;
@@ -19,10 +18,10 @@ public class ChangeEvent {
     private boolean isCompleted = false;
 
     // data columns
-    private Object[] dataBefore;
-    private Object[] dataAfter;
+    private JDBCColumn[] dataBefore;
+    private JDBCColumn[] dataAfter;
 
-    public ChangeEvent(CDCCheckPoint checkpoint, byte[] sqlVal, int op, int cmdId, long txStartTime) {
+    public ChangeEvent(CDCCheckPoint checkpoint, byte[] sqlVal, int op, int cmdId, Timestamp txStartTime) {
         this.checkpoint = checkpoint;
         this.op = op;
         this.seqVal = sqlVal;
@@ -46,24 +45,33 @@ public class ChangeEvent {
         this.seqVal = seqVal;
     }
 
-    public long getTxStartTime() {
+    public int offset() {
+        return checkpoint.offset();
+    }
+
+    public Timestamp txCommitTime() {
         return txStartTime;
     }
 
-    public Object[] getDataBefore() {
+    public JDBCColumn[] getDataBefore() {
         return dataBefore;
     }
 
-    public Object[] getDataAfter() {
+    public JDBCColumn[] getDataAfter() {
         return dataAfter;
     }
 
-    public void setUpdateBefore(Object[] dataBefore) {
+    public void setUpdateBefore(JDBCColumn[] dataBefore) {
         this.dataBefore = dataBefore;
         isCompleted = false;
     }
 
-    public void completeUpdate(Object[] dataAfter, byte[] seqVal, CDCCheckPoint checkpoint) {
+    public void setUpdateAfter(JDBCColumn[] dataAfter) {
+        this.dataAfter = dataAfter;
+        isCompleted = true;
+    }
+
+    public void completeUpdate(JDBCColumn[] dataAfter, byte[] seqVal, CDCCheckPoint checkpoint) {
         this.checkpoint = checkpoint;
         this.dataAfter = dataAfter;
         this.seqVal = seqVal;

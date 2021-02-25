@@ -102,8 +102,6 @@ public class Batch extends AbstractBatch {
             if (_destination == null) {
                 String[] datasetRetentionTableSuffix = aPackage.getDestination().split("/");
                 if (datasetRetentionTableSuffix.length == 3) {
-                    // todo
-                    LOG.info("===== destination = {}", Arrays.toString(datasetRetentionTableSuffix));
                     _destination = datasetRetentionTableSuffix[0] +
                             "/" + aPackage.getTopic() + datasetRetentionTableSuffix[2] +
                             "/" + datasetRetentionTableSuffix[1];
@@ -115,6 +113,9 @@ public class Batch extends AbstractBatch {
             }
 
             if (_schema == null) {
+                if (LOG.isTraceEnabled()) {
+                    LOG.trace("Creating a new Avro schema and BQ schema for batch");
+                }
                 _avroSchema = _schemaRegistry.getSchemaByTopic(aPackage.getTopic());
                 _schema = SchemaTranslator.translate(_avroSchema);
                 _committer.setDestTableSchema(_destination, _schema);
@@ -146,6 +147,9 @@ public class Batch extends AbstractBatch {
                 }
             }
 
+            if (LOG.isTraceEnabled()) {
+                LOG.trace("Translating record with avro schema {} into bq schema", _avroSchema, _schema);
+            }
             _batch.add(RecordTranslator.translate(record, _avroSchema));
 
             _ackCallbacks.add(aPackage.getAckCallback());

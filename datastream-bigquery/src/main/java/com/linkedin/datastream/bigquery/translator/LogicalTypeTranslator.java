@@ -16,11 +16,15 @@ import java.util.TimeZone;
 import org.apache.avro.Schema;
 
 import com.google.api.client.util.DateTime;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * This class has methods to translate avro logical types to appropriate BQ type.
  */
 class LogicalTypeTranslator {
+
+    private static final Logger LOG = LoggerFactory.getLogger(LogicalTypeTranslator.class);
 
     private static final String DATE_FORMAT = "yyyy-MM-dd";
     private static final String TIME_FORMAT = "HH:mm:ss";
@@ -78,7 +82,10 @@ class LogicalTypeTranslator {
      */
     static DateTime translateTimestampType(String instant, Schema avroSchema) {
         if (LogicalTypeIdentifier.isZonedTimestamp(avroSchema)) {
-            return new DateTime(Date.from(OffsetDateTime.parse(instant, DateTimeFormatter.ISO_OFFSET_DATE_TIME).toInstant()));
+            DateTime d = new DateTime(Date.from(OffsetDateTime.parse(instant, DateTimeFormatter.ISO_OFFSET_DATE_TIME).toInstant()));
+            // todo
+            LOG.info("schema {} is zoned time. Value is = {}", avroSchema, d.toString());
+            return d;
         }
         return null;
     }

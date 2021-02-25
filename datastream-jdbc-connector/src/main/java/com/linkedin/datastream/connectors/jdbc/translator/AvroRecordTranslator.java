@@ -1,5 +1,6 @@
-package com.linkedin.datastream.connectors.jdbc.cdc;
+package com.linkedin.datastream.connectors.jdbc.translator;
 
+import com.linkedin.datastream.connectors.jdbc.cdc.ChangeEvent;
 import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericData;
 import org.apache.avro.generic.GenericRecord;

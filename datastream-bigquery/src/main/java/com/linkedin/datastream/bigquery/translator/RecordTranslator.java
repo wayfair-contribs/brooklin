@@ -29,11 +29,14 @@ import org.apache.avro.util.Utf8;
 import com.google.api.client.util.DateTime;
 import com.google.api.services.bigquery.model.TableRow;
 import com.google.cloud.bigquery.InsertAllRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * This class translates given avro record into BQ row object.
  */
 public class RecordTranslator {
+    private static final Logger LOG = LoggerFactory.getLogger(RecordTranslator.class);
 
     /**
      * BiqQuery restricts to 9 decimal digits of scale
@@ -436,12 +439,15 @@ public class RecordTranslator {
                     fields.put(avroField.name(), translateRecord((GenericData.Record) record.get(avroField.name())));
                 }
             } else if (avroField.schema().getType() == Schema.Type.UNION) {
+                fields.put(avroField.name(), translateUnionTypeObject(record.get(avroField.name()), avroField.schema()));
+                /* todo: no need special handling for LSN
                 if (record.get(avroField.name()) != null && LogicalTypeIdentifier.isLSN(avroField.name())) {
                     fields.put(avroField.name(),
                             LogicalTypeTranslator.translateLSN(String.valueOf(record.get(avroField.name()))));
                 } else {
                     fields.put(avroField.name(), translateUnionTypeObject(record.get(avroField.name()), avroField.schema()));
                 }
+               */
             } else if (avroField.schema().getType() == Schema.Type.FIXED) {
                 fields.put(avroField.name(), translateFixedTypeObject(record.get(avroField.name()), avroField.schema()));
             } else if (avroField.schema().getType() == Schema.Type.MAP) {

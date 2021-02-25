@@ -1,6 +1,6 @@
 package com.linkedin.datastream.connectors.jdbc.cdc;
 
-import com.linkedin.datastream.common.DatastreamRuntimeException;
+import com.linkedin.datastream.connectors.jdbc.Utils;
 import com.linkedin.datastream.server.providers.PersistableCheckpoint;
 import org.jetbrains.annotations.NotNull;
 

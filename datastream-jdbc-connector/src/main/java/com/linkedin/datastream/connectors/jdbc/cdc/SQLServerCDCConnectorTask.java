@@ -9,13 +9,14 @@ import com.linkedin.datastream.common.BrooklinEnvelope;
 import com.linkedin.datastream.common.BrooklinEnvelopeMetadataConstants;
 import com.linkedin.datastream.common.DatastreamRecordMetadata;
 import com.linkedin.datastream.common.DatastreamRuntimeException;
+import com.linkedin.datastream.connectors.jdbc.JDBCColumn;
+import com.linkedin.datastream.connectors.jdbc.Utils;
 import com.linkedin.datastream.server.DatastreamEventProducer;
 import com.linkedin.datastream.server.DatastreamProducerRecord;
 import com.linkedin.datastream.server.DatastreamProducerRecordBuilder;
 import com.linkedin.datastream.server.FlushlessEventProducerHandler;
 import com.linkedin.datastream.server.providers.CustomCheckpointProvider;
 import com.linkedin.datastream.server.providers.KafkaCustomCheckpointProvider;
-import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -64,11 +65,10 @@ public class SQLServerCDCConnectorTask {
     private CustomCheckpointProvider<CDCCheckPoint, CDCCheckPoint.Deserializer> _checkpointProvider;
     private AtomicBoolean _resetToSafeCommit;
 
-    // Cache of avro schema
-    private Schema _avroSchema;
-
     // Non-null pendingEvent means Connector received updateBefore only but has not got updateAfter
     ChangeEvent _pendingEvent = null;
+
+    CDCEventTranslator _eventTranslator;
 
     private SQLServerCDCConnectorTask(SQLServerCDCConnectorTaskBuilder builder) {
         _datastreamName = builder._datastreamName;
@@ -86,6 +86,7 @@ public class SQLServerCDCConnectorTask {
         _resetToSafeCommit = new AtomicBoolean(false);
 
         _rowReader = new CDCRowReader();
+        _eventTranslator = new CDCEventTranslator(_table);
 
         generateQuery();
     }
@@ -229,8 +230,6 @@ public class SQLServerCDCConnectorTask {
     private void processChanges(ResultSet resultSet) {
         int resultSetSize = 0;
 
-        Schema avroSchema = getSchemaFromResultSet(resultSet);
-
         while (_rowReader.next(resultSet)) {
             long processStartTime = System.currentTimeMillis();
             resultSetSize++;
@@ -266,7 +265,8 @@ public class SQLServerCDCConnectorTask {
             }
 
             // Transform to Avro
-            GenericRecord record = AvroRecordTranslator.fromChangeEvent(avroSchema, curEvent);
+            // GenericRecord record = AvroRecordTranslator.fromChangeEvent(avroSchema, curEvent);
+            GenericRecord record = _eventTranslator.translateToInternalFormat(curEvent);
 
             // Send to KafkaTransportProvider
             HashMap<String, String> meta = new HashMap<>();
@@ -277,7 +277,7 @@ public class SQLServerCDCConnectorTask {
             DatastreamProducerRecordBuilder builder = new DatastreamProducerRecordBuilder();
             builder.addEvent(envelope);
             builder.setEventsSourceTimestamp(processStartTime);
-            builder.setEventsProduceTimestamp(curEvent.getTxStartTime());
+            builder.setEventsProduceTimestamp(curEvent.txCommitTime().getTime());
             DatastreamProducerRecord producerRecord = builder.build();
 
             _flushlessProducer.send(producerRecord, _id, 0, checkpoint,
@@ -318,49 +318,40 @@ public class SQLServerCDCConnectorTask {
         }
     }
 
-    private Schema getSchemaFromResultSet(ResultSet rs) {
-        try {
-            ResultSetMetaData metaData = rs.getMetaData();
-            // Use cached schema or parse from ResultSet
-            if (_avroSchema == null) {
-                _avroSchema = SchemaTranslator.fromResultSet(metaData);
-            }
-            return _avroSchema;
-        } catch (SQLException e) {
-            LOG.error("Failed to retrieve the schema of table {}", _table);
-            throw new DatastreamRuntimeException(e);
-        }
-    }
-
     private ChangeEvent buildEventWithInsertOrDelete(int op, CDCCheckPoint checkpoint) {
-        long txTs = _rowReader.readTransactionTime();
+        Timestamp txTs = _rowReader.readTransactionTime();
         int cmdId = _rowReader.readCommandId();
-        ChangeEvent event = new ChangeEvent(null, null, op, cmdId, txTs);
-        return completeEventWithUpdateAfter(event, checkpoint);
+        byte[] seqVal = _rowReader.readSeqVal();
+        JDBCColumn[] dataAfter = _rowReader.readDataColumns();
+
+        ChangeEvent event = new ChangeEvent(checkpoint, seqVal, op, cmdId, txTs);
+        event.setUpdateAfter(dataAfter);
+
+        return event;
     }
 
     private ChangeEvent buildEventWithUpdateBefore(CDCCheckPoint checkpoint) {
-        long txTs = _rowReader.readTransactionTime();
+        Timestamp txTs = _rowReader.readTransactionTime();
         int cmdId = _rowReader.readCommandId();
         byte[] seqVal = _rowReader.readSeqVal();
-        Object[] dataBefore = _rowReader.readDataColumns();
+        JDBCColumn[] dataBefore = _rowReader.readDataColumns();
 
         ChangeEvent event = new ChangeEvent(checkpoint, seqVal, 3, cmdId, txTs);
         event.setUpdateBefore(dataBefore);
         return event;
     }
 
-    private ChangeEvent completeEventWithUpdateAfter(ChangeEvent preEvent, CDCCheckPoint checkpoint) {
+    private ChangeEvent completeEventWithUpdateAfter(ChangeEvent updateBefore, CDCCheckPoint checkpoint) {
         byte[] seqVal = _rowReader.readSeqVal();
         int cmdId = _rowReader.readCommandId();
-        Object[] dataAfter = _rowReader.readDataColumns();
+        JDBCColumn[] dataAfter = _rowReader.readDataColumns();
 
-        if (preEvent == null) {
-            LOG.warn("No updateBefore found. cmdId = {}, seqVal = {}", cmdId, seqVal);
+        if (updateBefore == null) {
+            LOG.info("No updateBefore found. cmdId = {}, seqVal = {}", cmdId, seqVal);
         }
 
-        preEvent.completeUpdate(dataAfter, seqVal, checkpoint);
-        return preEvent;
+        updateBefore.completeUpdate(dataAfter, seqVal, checkpoint);
+        return updateBefore;
     }
 
 

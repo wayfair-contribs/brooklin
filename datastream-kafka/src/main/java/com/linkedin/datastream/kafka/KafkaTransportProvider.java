@@ -180,13 +180,15 @@ public class KafkaTransportProvider<K, V> implements TransportProvider {
       _eventTransportErrorRate.mark();
       _dynamicMetricsManager.createOrUpdateMeter(_metricsNamesPrefix, topicName, EVENT_TRANSPORT_ERROR_RATE, 1);
       String errorMessage = String.format(
-          "Sending DatastreamRecord (%s) to topic %s, partition %s, Kafka cluster %s failed with exception.", record,
-          topicName, record.getPartition().orElse(-1), destinationUri);
+          "Sending Datastream Record (%s) to topic %s, partition %s, Kafka cluster %s failed with exception.",
+              record.getCheckpoint(), topicName, record.getPartition().orElse(-1), destinationUri);
 
       ErrorLogger.logAndThrowDatastreamRuntimeException(LOG, errorMessage, e);
     }
 
-    LOG.debug("Done sending Datastream event record: {}", record);
+    if (LOG.isTraceEnabled()) {
+      LOG.trace("Done sending Datastream event record: {}", record.getCheckpoint());
+    }
   }
 
   @Override

@@ -429,6 +429,7 @@ abstract public class AbstractKafkaBasedConnectorTask implements Runnable, Consu
     try {
       long curPollTime = System.currentTimeMillis();
       _lastPolledTimeMillis = curPollTime;
+      _logger.info("consumer {} start polling, interval = {}", _taskName, pollInterval);
       records = consumerPoll(pollInterval);
       _logger.info("consumer {} consuming {} records", _taskName, records.count());
 

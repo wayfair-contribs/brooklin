@@ -1,14 +1,14 @@
 package com.linkedin.datastream.connectors.jdbc.cdc;
 
 import com.linkedin.datastream.common.DatastreamRuntimeException;
+import com.linkedin.datastream.connectors.jdbc.JDBCColumn;
 import com.linkedin.datastream.metrics.DynamicMetricsManager;
 
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.sql.Timestamp;
+import java.sql.*;
 
 public class CDCRowReader {
     ResultSet _row;
+    ResultSetMetaData _schema;
 
     public CDCRowReader() {
     }
@@ -24,6 +24,7 @@ public class CDCRowReader {
         try {
             hasNext = resultSet.next();
             _row = resultSet;
+            _schema = resultSet.getMetaData();
         } catch (SQLException e) {
             throw new DatastreamRuntimeException(e);
         }
@@ -34,10 +35,10 @@ public class CDCRowReader {
         return hasNext;
     }
 
-    public long readTransactionTime() {
+    public Timestamp readTransactionTime() {
         try {
             Timestamp ts = _row.getTimestamp(CDCQueryBuilder.TRANSACTION_TIME_INDEX);
-            return ts == null ? 0 : ts.getTime();
+            return ts;
         } catch (SQLException e) {
             throw new DatastreamRuntimeException(e);
         }
@@ -59,16 +60,24 @@ public class CDCRowReader {
         }
     }
 
-    public Object[] readDataColumns() {
+    public JDBCColumn[] readDataColumns() {
         try {
             int numCols = _row.getMetaData().getColumnCount();
             int size = numCols - CDCQueryBuilder.META_COLUMN_NUM;
-            Object[] data = new Object[size];  // exclude 5 meta columns
+            JDBCColumn[] columns = new JDBCColumn[size];  // exclude 5 meta columns
             //  read columns from 6 to last-1.
             for (int i = CDCQueryBuilder.DATA_COLUMN_START_INDEX; i < numCols; i++) {
-                data[i - CDCQueryBuilder.DATA_COLUMN_START_INDEX] = _row.getObject(i);
+                columns[i - CDCQueryBuilder.DATA_COLUMN_START_INDEX] =
+                        JDBCColumn.JDBCColumnBuilder.builder()
+                                .name(_schema.getColumnName(i))
+                                .sqlType(_schema.getColumnType(i))
+                                .value(_row.getObject(i))
+                                .precision(_schema.getPrecision(i))
+                                .scale(_schema.getScale(i))
+                                .optional(_schema.isNullable(i) == 1)
+                                .build();
             }
-            return data;
+            return columns;
         } catch (SQLException e) {
             throw new DatastreamRuntimeException("Failed to read data columns in each row", e);
         }

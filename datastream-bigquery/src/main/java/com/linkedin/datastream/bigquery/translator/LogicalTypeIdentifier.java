@@ -9,11 +9,14 @@ import java.util.Arrays;
 import java.util.List;
 
 import org.apache.avro.Schema;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * This class has methods to identify logical types in avro.
  */
 class LogicalTypeIdentifier {
+    static Logger LOG = LoggerFactory.getLogger(LogicalTypeIdentifier.class);
 
     private static final String DEBEZIUM_LOGICAL_TYPE_PROPERTY = "connect.name";
 
@@ -48,6 +51,10 @@ class LogicalTypeIdentifier {
     private static final String AVRO_TIMESTAMPMICROS_NAME = "timestamp-micros";
     private static final String AVRO_DECIMAL_NAME = "decimal";
 
+    public final static String ZONED_TIMESTAMP_NAME = "zoned_timestamp";
+    public final static String LOGICAL_TYPE_KEY = "logical_type_key";
+
+
     private static final List<String> AVRO_TIME_TYPES = Arrays.asList(AVRO_TIMEMILLIS_NAME, AVRO_TIMEMICROS_NAME);
     private static final List<String> AVRO_TIMESTAMP_TYPES = Arrays.asList(AVRO_TIMESTAMPMILLIS_NAME, AVRO_TIMESTAMPMICROS_NAME);
 
@@ -79,7 +86,10 @@ class LogicalTypeIdentifier {
      * @return true if the avro schema is timestamp logical type
      */
     static boolean isTimestampType(Schema avroSchema) {
-        return avroSchema.getLogicalType() != null && AVRO_TIMESTAMP_TYPES.contains(avroSchema.getLogicalType().getName());
+        boolean isLogicalType = avroSchema.getLogicalType() != null &&
+                AVRO_TIMESTAMP_TYPES.contains(avroSchema.getLogicalType().getName());
+        boolean isZonedTimestamp = isBrooklinZonedTimestamp(avroSchema);
+        return isLogicalType || isZonedTimestamp;
     }
 
     /**
@@ -167,15 +177,25 @@ class LogicalTypeIdentifier {
      * @return true if the avro schema is zoned timestamp logical type
      */
     static boolean isZonedTimestamp(Schema avroSchema) {
+        return isBrooklinZonedTimestamp(avroSchema) ||
+                isDebeziumZonedTimestamp(avroSchema);
+    }
+
+    static boolean isDebeziumZonedTimestamp(Schema avroSchema) {
         return (avroSchema.getProp(DEBEZIUM_LOGICAL_TYPE_PROPERTY) != null &&
                 avroSchema.getProp(DEBEZIUM_LOGICAL_TYPE_PROPERTY).equals(DEBEZIUM_ZONEDTIMESTAMP_NAME));
     }
 
+    static boolean isBrooklinZonedTimestamp(Schema avroSchema) {
+        return (avroSchema.getProp(LOGICAL_TYPE_KEY) != null &&
+                avroSchema.getProp(LOGICAL_TYPE_KEY).equals(ZONED_TIMESTAMP_NAME));
+    }
+
     /**
-     * checks if avro schema is Datetime type with millisecond precision
-     * @param avroSchema avro schema to inspect
-     * @return true if the avro schema is datetime logical type with millisecond precision
-     */
+         * checks if avro schema is Datetime type with millisecond precision
+         * @param avroSchema avro schema to inspect
+         * @return true if the avro schema is datetime logical type with millisecond precision
+         */
     static boolean isMilliDatetime(Schema avroSchema) {
         return (avroSchema.getProp(DEBEZIUM_LOGICAL_TYPE_PROPERTY) != null &&
                 avroSchema.getProp(DEBEZIUM_LOGICAL_TYPE_PROPERTY).equals(DEBEZIUM_TIMESTAMP_NAME));

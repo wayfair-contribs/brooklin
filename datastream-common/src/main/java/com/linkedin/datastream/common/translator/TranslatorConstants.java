@@ -19,4 +19,5 @@ public class TranslatorConstants {
      *  Represents the record name in the Avro schema
      */
     protected static final String AVRO_SCHEMA_RECORD_NAME = "sqlRecord";
+    public static final String AVRO_FIELD_SEQ_NO = "seq_no";
 }

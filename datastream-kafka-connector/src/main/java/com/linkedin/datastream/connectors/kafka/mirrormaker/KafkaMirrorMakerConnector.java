@@ -131,10 +131,12 @@ public class KafkaMirrorMakerConnector extends AbstractKafkaConnector {
         if (placeholderIndex != -1 && placeholderIndex == destinationConnectionString.lastIndexOf(MM_TOPIC_PLACEHOLDER)) {
           LOG.info("Allowing user managed datastream destination with connector {} for datastream {}", stream.getConnectorName(), stream.getName());
         } else {
-          LOG.error("User managed datastream destination format is invalid for connector {} and datastream {}", stream.getConnectorName(), stream.getName());
-          throw new DatastreamValidationException(
-                  String.format("Datastream destination format is invalid for connector %s. Datastream: %s", stream.getConnectorName(), stream)
-          );
+          // TODO: Implement validation on the source to confirm that it is not a regex/wildcard source
+          LOG.warn("Allowing explicit user managed datastream destination with connector {} for datastream {}", stream.getConnectorName(), stream.getName());
+//          LOG.error("User managed datastream destination format is invalid for connector {} and datastream {}", stream.getConnectorName(), stream.getName());
+//          throw new DatastreamValidationException(
+//                  String.format("Datastream destination format is invalid for connector %s. Datastream: %s", stream.getConnectorName(), stream)
+//          );
         }
       } else {
         throw new DatastreamValidationException(
